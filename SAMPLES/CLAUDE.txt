@@ -1,0 +1,491 @@
+import React, { useState } from 'react';
+import { Download } from 'lucide-react';
+
+const WellnessForm = () => {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [appointments, setAppointments] = useState(Array(20).fill({
+    age: '', height: '', weight: '', bodyFat: '', water: '', muscle: '', 
+    physique: '', bmr: '', basal: '', bone: '', visceral: ''
+  }));
+  
+  const [evaluation, setEvaluation] = useState({
+    bodyFat: 'excellent',
+    bodyWater: 'excellent',
+    muscleMass: 'excellent',
+    visceralFat: 'excellent',
+    questionnaire: 'excellent'
+  });
+
+  const [page2Data, setPage2Data] = useState({
+    date: '',
+    name: '',
+    coach: ''
+  });
+
+  const updateAppointment = (index, field, value) => {
+    const newAppointments = [...appointments];
+    newAppointments[index] = { ...newAppointments[index], [field]: value };
+    setAppointments(newAppointments);
+  };
+
+  const bodyFatData = [
+    { age: '18-39', women: { excellent: '< 21.0', healthy: '21.0 - 24.9', medium: '25.0 - 29.9', obese: '> 30.0' }, men: { excellent: '< 8.0', healthy: '8.0 - 14.9', medium: '15.0 - 19.0', obese: '> 20.1' } },
+    { age: '40-59', women: { excellent: '< 23.0', healthy: '23.0 - 27.9', medium: '28.0 - 32.9', obese: '> 33.0' }, men: { excellent: '< 11.0', healthy: '11.0 - 17.9', medium: '18.0 - 22.9', obese: '> 23.0' } },
+    { age: '60-79', women: { excellent: '< 24.0', healthy: '24.0 - 29.9', medium: '30.0 - 34.9', obese: '> 35.0' }, men: { excellent: '< 13.0', healthy: '13.0 - 19.9', medium: '20.0 - 24.9', obese: '> 25.0' } },
+  ];
+
+  const exportToPDF = () => {
+    window.print();
+  };
+
+  return (
+    <div className="bg-gray-100 min-h-screen">
+      {/* Page Navigation */}
+      <div className="flex justify-center gap-4 p-4 print:hidden">
+        <button 
+          onClick={() => setCurrentPage(1)}
+          className={`px-6 py-2 rounded ${currentPage === 1 ? 'bg-blue-600 text-white' : 'bg-gray-300'}`}
+        >
+          Page 1
+        </button>
+        <button 
+          onClick={() => setCurrentPage(2)}
+          className={`px-6 py-2 rounded ${currentPage === 2 ? 'bg-blue-600 text-white' : 'bg-gray-300'}`}
+        >
+          Page 2
+        </button>
+        <button 
+          onClick={exportToPDF}
+          className="bg-green-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-green-700"
+        >
+          <Download size={20} />
+          Export as PDF
+        </button>
+      </div>
+
+      {/* Page 1 */}
+      {currentPage === 1 && (
+        <div className="max-w-7xl mx-auto bg-white shadow-lg p-6 page-break">
+          <div className="grid grid-cols-2 gap-4">
+            {/* Left Section */}
+            <div className="border-2 border-black">
+              <div className="border-b-2 border-black p-2 font-bold text-center text-sm">
+                Please bring along this Pass to your next appointment
+              </div>
+              
+              {/* Table Headers */}
+              <div className="grid grid-cols-11 text-xs border-b border-black">
+                <div className="border-r border-black p-1 text-center font-semibold">Age:</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Height<br/>cm</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Body Fat<br/>Range</div>
+                <div className="border-r border-black p-1 text-center font-semibold">% Body<br/>Water<br/>Range</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Muscle<br/>Mass</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Physique<br/>Ratings</div>
+                <div className="border-r border-black p-1 text-center font-semibold">BMR</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Basal<br/>metabolic<br/>Age</div>
+                <div className="border-r border-black p-1 text-center font-semibold">Bone<br/>Mass</div>
+                <div className="p-1 text-center font-semibold">Visceral<br/>Fat</div>
+              </div>
+
+              {/* First Row with Icons */}
+              <div className="grid grid-cols-11 text-xs border-b border-black bg-gray-50">
+                <div className="border-r border-black p-1 text-center text-xs">Your next<br/>appoint-<br/>ment</div>
+                <div className="border-r border-black p-1 text-center">Weight<br/>KG</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">👤</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">💧</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">💪</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">🏋️</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">🔥</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">📅</div>
+                <div className="border-r border-black p-1 flex justify-center items-center text-2xl">🦴</div>
+                <div className="p-1 flex justify-center items-center text-2xl">🫃</div>
+              </div>
+
+              {/* Data Rows */}
+              {appointments.slice(0, 15).map((apt, idx) => (
+                <div key={idx} className="grid grid-cols-11 text-xs border-b border-gray-300">
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.age} onChange={(e) => updateAppointment(idx, 'age', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.height} onChange={(e) => updateAppointment(idx, 'height', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.weight} onChange={(e) => updateAppointment(idx, 'weight', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.bodyFat} onChange={(e) => updateAppointment(idx, 'bodyFat', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.water} onChange={(e) => updateAppointment(idx, 'water', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.muscle} onChange={(e) => updateAppointment(idx, 'muscle', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.physique} onChange={(e) => updateAppointment(idx, 'physique', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.bmr} onChange={(e) => updateAppointment(idx, 'bmr', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.basal} onChange={(e) => updateAppointment(idx, 'basal', e.target.value)} />
+                  <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.bone} onChange={(e) => updateAppointment(idx, 'bone', e.target.value)} />
+                  <input className="p-0.5 text-center w-full text-xs" value={apt.visceral} onChange={(e) => updateAppointment(idx, 'visceral', e.target.value)} />
+                </div>
+              ))}
+
+              {/* Evaluation Section */}
+              <div className="mt-2">
+                <div className="grid grid-cols-6 text-xs">
+                  <div className="border border-black p-2 font-bold bg-gray-300">Evaluation</div>
+                  <div className="border border-black p-2 text-center font-semibold bg-yellow-300">excellent</div>
+                  <div className="border border-black p-2 text-center font-semibold bg-white">good</div>
+                  <div className="border border-black p-2 text-center font-semibold bg-white">medium</div>
+                  <div className="border border-black p-2 text-center font-semibold bg-white">bad</div>
+                  <div className="border border-black p-2 text-center font-semibold bg-red-300">alarming</div>
+                </div>
+                
+                {['Body Fat', 'Body Water', 'Muscle Mass', 'Visceral Fat', 'Questionnaire'].map((item, idx) => {
+                  const key = item.replace(' ', '').charAt(0).toLowerCase() + item.replace(' ', '').slice(1);
+                  return (
+                    <div key={idx} className="grid grid-cols-6 text-xs">
+                      <div className="border border-black p-2 bg-yellow-300 font-semibold">{item}</div>
+                      {['excellent', 'good', 'medium', 'bad', 'alarming'].map((level, levelIdx) => (
+                        <div key={level} className={`border border-black p-2 text-center ${levelIdx === 0 ? 'bg-yellow-300' : levelIdx === 4 ? 'bg-red-300' : 'bg-white'}`}>
+                          <input 
+                            type="checkbox" 
+                            checked={evaluation[key] === level}
+                            onChange={() => setEvaluation({...evaluation, [key]: level})}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Section */}
+            <div>
+              {/* Body Fat Range Table */}
+              <div className="border-2 border-black mb-3">
+                <div className="bg-gray-200 p-2 font-bold flex items-center gap-2 text-sm">
+                  <span className="text-2xl">👤</span>
+                  <span>Body Fat Range:</span>
+                </div>
+                
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-black">
+                      <th className="border-r border-black p-1" rowSpan="2"></th>
+                      <th className="border-r border-black p-1 bg-yellow-200" colSpan="4">Women</th>
+                      <th className="border-r border-black p-1" colSpan="4">Men</th>
+                    </tr>
+                    <tr className="border-b border-black">
+                      <th className="border-r border-black p-1 bg-yellow-200">excellent</th>
+                      <th className="border-r border-black p-1">healthy</th>
+                      <th className="border-r border-black p-1">medium</th>
+                      <th className="border-r border-black p-1">obese</th>
+                      <th className="border-r border-black p-1 bg-yellow-200">excellent</th>
+                      <th className="border-r border-black p-1">healthy</th>
+                      <th className="border-r border-black p-1">medium</th>
+                      <th className="p-1">obese</th>
+                    </tr>
+                    <tr className="border-b border-black bg-yellow-200">
+                      <th className="border-r border-black p-1 text-left">Age</th>
+                      <th className="border-r border-black p-1">20 - 24</th>
+                      <th className="border-r border-black p-1">25 - 29</th>
+                      <th className="border-r border-black p-1">30 - 34</th>
+                      <th className="border-r border-black p-1">35 - 39</th>
+                      <th className="border-r border-black p-1">20 - 24</th>
+                      <th className="border-r border-black p-1">25 - 29</th>
+                      <th className="border-r border-black p-1">30 - 34</th>
+                      <th className="p-1">35 - 39</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bodyFatData.map((row, idx) => (
+                      <tr key={idx} className="border-b border-gray-400">
+                        <td className="border-r border-black p-1 text-center font-semibold bg-yellow-200">{row.age}</td>
+                        <td className="border-r border-black p-1 text-center bg-yellow-200">{row.women.excellent}</td>
+                        <td className="border-r border-black p-1 text-center">{row.women.healthy}</td>
+                        <td className="border-r border-black p-1 text-center">{row.women.medium}</td>
+                        <td className="border-r border-black p-1 text-center">{row.women.obese}</td>
+                        <td className="border-r border-black p-1 text-center bg-yellow-200">{row.men.excellent}</td>
+                        <td className="border-r border-black p-1 text-center">{row.men.healthy}</td>
+                        <td className="border-r border-black p-1 text-center">{row.men.medium}</td>
+                        <td className="p-1 text-center">{row.men.obese}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                
+                <div className="p-2 text-xs">
+                  <p className="mb-1 leading-tight">For Sports people (measured in athletic modus) with a minimum training from 10 hours a week the Index is valid: Women 11 to 18 % / Men: 5 to 15%</p>
+                  <p className="text-xs italic mb-2">(University of Cambridge, 1999)</p>
+                  <div className="flex justify-end gap-2">
+                    <div className="flex flex-col items-center">
+                      <span className="font-bold">-</span>
+                      <span className="border border-black px-3 py-1 text-xs">Under</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="font-bold">0</span>
+                      <span className="border border-black px-3 py-1 text-xs">Healthy</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="font-bold">+</span>
+                      <span className="border border-black px-3 py-1 text-xs">Over</span>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="font-bold">++</span>
+                      <span className="border border-black px-3 py-1 text-xs">Obese</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Water Index */}
+              <div className="border-2 border-black mb-3">
+                <div className="bg-gray-200 p-2 font-bold flex items-center gap-2 text-sm">
+                  <span className="text-2xl">💧</span>
+                  <span>Water Index:</span>
+                </div>
+                <div className="p-3">
+                  <div className="flex justify-between text-xs mb-1 font-semibold">
+                    <span>30%</span><span>40%</span><span>50%</span><span>60%</span><span>70%</span><span>80%</span><span>90%</span>
+                  </div>
+                  <div className="text-xs mb-1 font-semibold">WHO 2001</div>
+                  <div className="mb-2">
+                    <div className="font-bold text-xs mb-1">Women</div>
+                    <div className="flex h-4 border border-black">
+                      <div className="w-full bg-gradient-to-r from-blue-100 via-blue-300 to-blue-500 relative">
+                        <div className="absolute" style={{left: '55%', width: '10%', height: '100%', backgroundColor: 'black'}}></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mb-2">
+                    <div className="font-bold text-xs mb-1">Men</div>
+                    <div className="flex h-4 border border-black">
+                      <div className="w-full bg-gradient-to-r from-blue-100 via-blue-300 to-blue-500 relative">
+                        <div className="absolute" style={{left: '58%', width: '10%', height: '100%', backgroundColor: 'black'}}></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs mb-1">Children</div>
+                    <div className="flex h-4 border border-black">
+                      <div className="w-full bg-gradient-to-r from-blue-100 via-blue-300 to-blue-500 relative">
+                        <div className="absolute" style={{left: '65%', width: '15%', height: '100%', backgroundColor: 'black'}}></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Muscle Index */}
+              <div className="border-2 border-black">
+                <div className="bg-gray-200 p-2 font-bold flex items-center gap-2 text-sm">
+                  <span className="text-2xl">💪</span>
+                  <span>Muscle Index & Physique Ratings:</span>
+                </div>
+                <div className="p-3 text-xs">
+                  <p className="mb-2 leading-tight">The Muscle Index is given in kg, the value belonging to it is the Physique Ratings:</p>
+                  
+                  <div className="grid grid-cols-3 mb-2 border border-black">
+                    <div className="bg-red-200 p-2 border-r border-black font-bold text-center">obese, untrained</div>
+                    <div className="bg-white p-2 border-r border-black text-center font-bold">normal</div>
+                    <div className="bg-yellow-300 p-2 text-center font-bold">excellent</div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs mb-3">
+                    <div className="leading-relaxed">
+                      <div><span className="font-bold">1</span> Hidden Obese</div>
+                      <div><span className="font-bold">2</span> Obese</div>
+                      <div><span className="font-bold">3</span> Solidly-built</div>
+                    </div>
+                    <div className="leading-relaxed">
+                      <div><span className="font-bold">4</span> Under-exercised</div>
+                      <div><span className="font-bold">5</span> Standard</div>
+                      <div><span className="font-bold">6</span> Standard Muscular</div>
+                    </div>
+                    <div className="leading-relaxed">
+                      <div><span className="font-bold">7</span> Thin</div>
+                      <div><span className="font-bold">8</span> Thin & muscular</div>
+                      <div><span className="font-bold">9</span> Very muscular</div>
+                    </div>
+                  </div>
+
+                  <div className="text-xs leading-tight">
+                    <p className="font-bold mb-1">Why is monitoring Muscle Mass important?</p>
+                    <p>For every extra KG of muscle gained the body uses approximately 100 extra calories a day. Every body who experiences a change in the muscle mass should monitor and adapt the calorie intake accordingly. Because muscle is denser than fat, monitoring your muscle mass gives you a more accurate understanding of your overall body compositions and changes in your total body weight.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Page 2 */}
+      {currentPage === 2 && (
+        <div className="max-w-4xl mx-auto bg-white shadow-lg page-break">
+          <div className="grid grid-cols-2">
+            {/* Left Column - Information */}
+            <div className="p-4 text-xs leading-relaxed">
+              <div className="mb-4">
+                <div className="flex items-start gap-2 mb-3">
+                  <span className="text-2xl">🏋️</span>
+                  <div>
+                    <p className="font-bold mb-1">What is Physique Rating?</p>
+                    <p>Offers you the opportunity to set a desired Physique Rating from which you can tailor your health/fitness programme accordingly</p>
+                  </div>
+                </div>
+
+                <p className="font-bold mb-1">Why is monitoring Physique Rating important?</p>
+                <p className="mb-3">When a person increases their activity level their weight may not change but their balance of body fat and muscle may alter which will change the overall physique or body shape. The physique rating helps accurately guide through a diet and fitness programme</p>
+
+                <div className="flex items-start gap-2 mb-3">
+                  <span className="text-2xl">🔥</span>
+                  <div>
+                    <p className="font-bold mb-1">What is Basal Metabolic Rate Indicator?</p>
+                    <p>The Basal Metabolic Rate (BMR) is the number of calories the body needs when at rest.</p>
+                  </div>
+                </div>
+
+                <p className="font-bold mb-1">Why is monitoring the Basal Metabolic Rate important?</p>
+                <p className="mb-3">Understanding the Basal Metabolic Rate will allow you to monitor the number of calories your body requires according to your Physique and lifestyle. The more muscle or general activity you take the more calories you require. The Basal Metabolic Rate level also decreases as the body ages</p>
+
+                <div className="flex items-start gap-2 mb-3">
+                  <span className="text-2xl">📅</span>
+                  <div>
+                    <p className="font-bold mb-1">What is Metabolic Age Rating?</p>
+                    <p>Basal Metabolic Rate starts to decrease after the age of 16/17 years old. Your Metabolic Age Rating indicates what age level your body is currently rated at</p>
+                  </div>
+                </div>
+
+                <p className="font-bold mb-1">Why is the Metabolic Age Rating important?</p>
+                <p>If the age indicated is higher than your actual age then you need to improve your Basal Metabolic Rate. Increasing exercise levels will build healthier muscle tissue which burn more calories, consequently improving your Metabolic Age Rating</p>
+              </div>
+
+              <div className="mb-4">
+                <div className="flex items-start gap-2 mb-2">
+                  <span className="text-2xl">🦴</span>
+                  <div className="font-bold">Bone Mass:</div>
+                </div>
+                
+                <table className="w-full border-2 border-black text-xs mb-2">
+                  <thead>
+                    <tr className="bg-yellow-200">
+                      <th className="border border-black p-1" colSpan="3">women</th>
+                    </tr>
+                    <tr>
+                      <th className="border border-black p-1">less than 50 kg</th>
+                      <th className="border border-black p-1">50 kg to 75 kg</th>
+                      <th className="border border-black p-1">more than 75 kg</th>
+                    </tr>
+                    <tr>
+                      <td className="border border-black p-1 text-center">1.95 kg</td>
+                      <td className="border border-black p-1 text-center">2.4 kg</td>
+                      <td className="border border-black p-1 text-center">2.95 kg</td>
+                    </tr>
+                    <tr className="bg-blue-900 text-white">
+                      <th className="border border-black p-1" colSpan="3">men</th>
+                    </tr>
+                    <tr>
+                      <th className="border border-black p-1">less than 65 kg</th>
+                      <th className="border border-black p-1">65kg to 95 kg</th>
+                      <th className="border border-black p-1">more than 95 kg</th>
+                    </tr>
+                    <tr>
+                      <td className="border border-black p-1 text-center">2.65 kg</td>
+                      <td className="border border-black p-1 text-center">3.29 kg</td>
+                      <td className="border border-black p-1 text-center">3.69 kg</td>
+                    </tr>
+                  </thead>
+                </table>
+              </div>
+
+              <div>
+                <div className="flex items-start gap-2 mb-2">
+                  <span className="text-2xl">🫃</span>
+                  <div className="font-bold">Visceral Fat:</div>
+                </div>
+                
+                <div className="mb-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="font-bold">1—4</span>
+                      <span className="ml-4">excellent</span>
+                    </div>
+                    <div>
+                      <span className="font-bold">5—8</span>
+                      <span className="ml-4 text-gray-400">healthy</span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-red-600">9—12</span>
+                      <span className="ml-4 text-red-600">bad</span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-red-600">over 13</span>
+                      <span className="ml-4 text-red-600">alarming</span>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="font-bold mb-1">What is Visceral Fat?</p>
+                <p>Fat that surrounds the vital organs in the trunk/ stomach area of the body.</p>
+                <p className="font-bold mb-1">Why is monitoring Visceral Fat important?</p>
+                <p>High Visceral Fat levels increase the risk of high blood pressure, heart disease and type 2 diabetes. Lowering your Visceral Fat levels can stabilise insulin action substantially, reducing your risk of diabetes and other related illnesses.</p>
+              </div>
+            </div>
+
+            {/* Right Column - Cover Page */}
+            <div className="relative h-full">
+              <div className="absolute inset-0 bg-gradient-to-b from-green-300 via-green-400 to-green-600">
+                <div className="flex flex-col h-full">
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <h1 className="text-5xl font-bold mb-2">PERSONAL</h1>
+                      <h2 className="text-6xl font-bold">WELLNESS PASS</h2>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white bg-opacity-90 p-6 m-8">
+                    <div className="mb-6">
+                      <label className="block font-bold mb-2">Date:</label>
+                      <input 
+                        type="text" 
+                        className="w-full border-b-2 border-black p-2"
+                        value={page2Data.date}
+                        onChange={(e) => setPage2Data({...page2Data, date: e.target.value})}
+                        placeholder="____/____/____"
+                      />
+                    </div>
+                    
+                    <div className="mb-6">
+                      <label className="block font-bold mb-2">Name</label>
+                      <input 
+                        type="text" 
+                        className="w-full border-b-2 border-black p-2"
+                        value={page2Data.name}
+                        onChange={(e) => setPage2Data({...page2Data, name: e.target.value})}
+                      />
+                    </div>
+                    
+                    <div className="border-2 border-black p-4 text-center">
+                      <label className="block font-bold mb-2">Your Personal Wellness Coach</label>
+                      <input 
+                        type="text" 
+                        className="w-full text-center p-2"
+                        value={page2Data.coach}
+                        onChange={(e) => setPage2Data({...page2Data, coach: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @media print {
+          .page-break {
+            page-break-after: always;
+          }
+          body {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default WellnessForm;

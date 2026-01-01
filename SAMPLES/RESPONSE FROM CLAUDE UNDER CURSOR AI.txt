@@ -1,0 +1,982 @@
+RESPONSE FROM CLAUDE UNDER CURSOR AI IS THIS:
+
+
+
+Created two analysis documents. Summary:
+Analysis complete
+Documents created
+CORE_MODULE_MAP.md — Analysis (9 sections)
+Core modules (domain-agnostic)
+Configurable modules (abstraction strategy)
+Industry plugins (optional features)
+Configuration architecture
+Migration strategy (4 phases)
+File mapping
+Risks and mitigation
+ARCHITECTURE_SUMMARY.md — Visual overview
+Architecture diagram
+Module classification table
+Abstraction examples
+Migration priorities
+Configuration structure
+Findings
+Already generic (core — no changes needed)
+Firebase/Firestore layer (generic CRUD)
+Task service (generic task management)
+Document service (generic file handling)
+All contexts (Auth, Notification, Settings)
+UI components (Button, Input, Card, etc.)
+Utilities (search, recycle bin, localStorage)
+Needs abstraction (configurable)
+Entity types: Candidate → Entity + config
+Pipelines: Hardcoded stages → config-driven
+Status options: Hardcoded → config file
+Field definitions: 60+ fields → config-driven
+Routes/Navigation: Hardcoded → config-driven
+User roles: Hardcoded → config-driven
+Industry-specific (plugins)
+CV Builder (recruitment-specific)
+Job Generator (recruitment-specific)
+WhatsApp integration (can be generic messaging)
+Recruitment-specific fields (move to config)
+Recommended approach
+Phase 1: Extract configuration (2-3 weeks)
+Move hardcoded values to config files
+No breaking changes
+App remains functional
+Phase 2: Abstract entities (3-4 weeks)
+Create generic Entity type
+Map Candidate → Entity via adapter
+Gradual migration
+Phase 3: Rename & refactor (2-3 weeks)
+Rename concepts (optional)
+Update references
+Clean up
+Phase 4: Extract plugins (2-3 weeks)
+Create plugin system
+Extract industry-specific features
+Make them optional
+Key insights
+Most infrastructure is already generic — mainly configuration extraction
+Proven patterns preserved — offline-first, Firestore structure, notifications
+Incremental migration — no big-bang rewrite
+Backward compatible — existing code continues to work during migration
+The documents include code examples, migration paths, and risk mitigation strategies. Ready for review and implementation planning.
+
+# Core Module Map - Industry-Agnostic Platform Extraction
+
+## Executive Summary
+
+This document maps the existing Recruitment CRM codebase into three layers:
+1. **Core** - Domain-agnostic infrastructure (never industry-specific)
+2. **Configurable** - Industry-neutral abstractions with configurable labels/pipelines
+3. **Industry Plug-ins** - Optional recruitment-specific features
+
+**Strategy**: Extract and rename, don't rewrite. Preserve proven patterns while introducing abstraction layers.
+
+---
+
+## 1. CORE MODULES (Domain-Agnostic)
+
+These modules contain zero industry-specific logic and can be reused across any vertical.
+
+### 1.1 Data Persistence Layer
+**Location**: `client/src/firebase/`
+
+**Core Components**:
+- `firebase-config.ts` - Firebase initialization (agnostic)
+- `firestore.ts` - Generic CRUD operations
+  - `addDoc`, `getDocs`, `updateDoc`, `deleteDoc` patterns
+  - `onSnapshot` real-time subscriptions
+  - Soft delete pattern (`isDeleted`, `deletedAt`)
+  - Timestamp management (`serverTimestamp`, `createdAt`, `updatedAt`)
+- `storage.ts` - File upload/download (generic)
+
+**Abstraction Strategy**:
+- Keep as-is: Firestore operations are already generic
+- Collection names become configurable (see Configurable section)
+- No changes needed - already industry-agnostic
+
+**Dependencies**: None (pure infrastructure)
+
+---
+
+### 1.2 Service Layer (Generic CRUD)
+**Location**: `client/src/services/`
+
+**Core Patterns** (already generic):
+- `taskService.ts` - Generic task management
+  - Status: `PENDING | IN_PROGRESS | COMPLETED | CANCELLED`
+  - Priority: `LOW | MEDIUM | HIGH`
+  - Assignment, due dates, descriptions
+- `documentService.ts` - Generic document handling
+  - Upload, download, categorization
+  - Version management (CV drafts pattern → generic drafts)
+  - Metadata tracking
+- `syncAllServices.ts` - Real-time sync orchestration
+  - Page-based subscription management
+  - Cleanup patterns
+
+**Abstraction Strategy**:
+- `candidateService.ts` → `entityService.ts` (generic entity CRUD)
+- `jobService.ts` → `opportunityService.ts` or remove (industry-specific)
+- Keep `taskService.ts`, `documentService.ts` as-is (already generic)
+- `appointmentService.ts` → `eventService.ts` (generic calendar events)
+
+**Key Pattern**: All services follow same structure:
+```typescript
+subscribeToX(callback, onError) → unsubscribe function
+addX(data) → id
+updateX(id, updates) → void
+deleteX(id) → void
+getX() → X[]
+```
+
+---
+
+### 1.3 Context Layer (State Management)
+**Location**: `client/src/contexts/`
+
+**Core Components**:
+- `AuthContext.tsx` - User authentication (generic)
+  - Login/logout
+  - User profile
+  - Role management (roles become configurable)
+- `NotificationContext.tsx` - Notification system (generic)
+  - Toast notifications
+  - Notification queue
+  - Read/unread tracking
+  - Cross-tab sync (localStorage + Firebase)
+- `SettingsContext.tsx` - Application settings (generic)
+  - Theme (light/dark)
+  - Language
+  - UI preferences
+  - Notification preferences
+
+**Abstraction Strategy**:
+- Keep all contexts as-is (already generic)
+- Make notification types configurable
+- Make user roles configurable
+
+---
+
+### 1.4 UI Components (Reusable)
+**Location**: `client/src/components/ui/`
+
+**Core Components** (already generic):
+- `Button.tsx` - Generic button component
+- `Input.tsx` - Form input component
+- `Card.tsx` - Card container component
+- `Toast.tsx` / `ToastContainer.tsx` - Notification UI
+- `StatusBadge.tsx` - Status display (make options configurable)
+
+**Abstraction Strategy**:
+- Keep all UI components as-is
+- Extract hardcoded status options to configuration
+- `CandidateStatusBadge.tsx` → `EntityStatusBadge.tsx` (generic)
+
+---
+
+### 1.5 Layout Components
+**Location**: `client/src/components/layout/`
+
+**Core Components**:
+- `Layout.tsx` - Main app layout (generic)
+- `Header.tsx` - Top navigation (make menu configurable)
+- `Sidebar.tsx` - Side navigation (make items configurable)
+- `ErrorBoundary.tsx` - Error handling (generic)
+
+**Abstraction Strategy**:
+- Keep layout structure
+- Make navigation items configurable (see Configurable section)
+
+---
+
+### 1.6 Utilities
+**Location**: `client/src/utils/`
+
+**Core Utilities** (already generic):
+- `searchUtils.ts` - Generic search/filtering
+- `localStorage.ts` - LocalStorage wrapper (generic CRUD)
+- `recycleBin.ts` - Soft delete management (generic)
+- `firebaseErrorHandler.ts` - Error handling
+- `navigationUtils.ts` - Navigation helpers
+
+**Abstraction Strategy**:
+- Keep all utilities as-is (already generic)
+- `migrateData.ts` - Make entity types configurable
+
+---
+
+### 1.7 Routing & App Structure
+**Location**: `client/src/App.tsx`, `client/src/main.tsx`
+
+**Core Components**:
+- Route definitions
+- Protected route wrapper
+- Context providers setup
+
+**Abstraction Strategy**:
+- Make routes configurable (see Configurable section)
+- Keep routing logic generic
+
+---
+
+## 2. CONFIGURABLE MODULES (Industry-Neutral Abstractions)
+
+These modules contain domain logic that can be abstracted through configuration.
+
+### 2.1 Entity Types & Schemas
+**Current**: `Candidate`, `Job`, `Appointment`, `Task`
+
+**Abstraction Strategy**:
+
+#### 2.1.1 Core Entity Type
+```typescript
+// Generic entity interface
+interface Entity {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  stage: string; // Configurable pipeline stage
+  status: string; // Configurable status
+  metadata: Record<string, any>; // Flexible field storage
+  createdAt: string;
+  updatedAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+}
+```
+
+#### 2.1.2 Configuration Layer
+```typescript
+// Industry configuration
+interface IndustryConfig {
+  entities: {
+    primary: EntityConfig;      // Candidate → Person/Client/Patient/etc
+    secondary?: EntityConfig[]; // Jobs → Opportunities/Projects/etc
+  };
+  pipelines: {
+    [entityType: string]: PipelineStage[];
+  };
+  fields: {
+    [entityType: string]: FieldDefinition[];
+  };
+  labels: {
+    [key: string]: string; // UI labels
+  };
+}
+```
+
+**Migration Path**:
+1. Create `Entity` interface (generic)
+2. Create `IndustryConfig` type
+3. Map `Candidate` → `Entity` with config
+4. Gradually migrate services to use `Entity` + config
+
+---
+
+### 2.2 Pipeline/Stage System
+**Current**: Hardcoded stages (`Onboarding`, `Interviewing`, `Offer`, `Hired`, `Rejected`)
+
+**Location**: 
+- `client/src/types/index.ts` - `CandidateStage` type
+- `client/src/components/ui/StatusBadge.tsx` - `candidateStatusOptions`
+- `client/src/pages/CandidatesPage.tsx` - Stage management
+
+**Abstraction Strategy**:
+
+```typescript
+// Generic pipeline configuration
+interface PipelineConfig {
+  id: string;
+  name: string;
+  stages: PipelineStage[];
+  transitions?: StageTransition[]; // Optional: allowed transitions
+}
+
+interface PipelineStage {
+  id: string;
+  label: string;
+  color: string;
+  bgColor: string;
+  order: number;
+  isTerminal?: boolean; // Final state (e.g., "Hired", "Rejected")
+}
+```
+
+**Configuration Example**:
+```typescript
+// Recruitment config
+const recruitmentPipeline: PipelineConfig = {
+  id: 'candidate',
+  name: 'Candidate Pipeline',
+  stages: [
+    { id: 'onboarding', label: 'Onboarding', color: 'blue', bgColor: 'bg-blue-100', order: 1 },
+    { id: 'interviewing', label: 'Interviewing', color: 'yellow', bgColor: 'bg-yellow-100', order: 2 },
+    // ...
+  ]
+};
+
+// Healthcare config (example)
+const healthcarePipeline: PipelineConfig = {
+  id: 'patient',
+  name: 'Patient Pipeline',
+  stages: [
+    { id: 'registration', label: 'Registration', color: 'blue', bgColor: 'bg-blue-100', order: 1 },
+    { id: 'consultation', label: 'Consultation', color: 'green', bgColor: 'bg-green-100', order: 2 },
+    // ...
+  ]
+};
+```
+
+**Migration Path**:
+1. Extract hardcoded stages to config file
+2. Update `StatusBadge` to read from config
+3. Update services to use config-driven stages
+
+---
+
+### 2.3 Field Definitions & Labels
+**Current**: Hardcoded fields in `Candidate` interface (60+ fields)
+
+**Abstraction Strategy**:
+
+```typescript
+interface FieldDefinition {
+  id: string;
+  label: string;
+  type: 'text' | 'email' | 'phone' | 'number' | 'date' | 'select' | 'multiselect' | 'file';
+  required?: boolean;
+  validation?: ValidationRule[];
+  options?: string[]; // For select types
+  category?: string; // Grouping (e.g., "Personal Info", "Work History")
+  order?: number;
+}
+
+interface EntityConfig {
+  type: string; // 'candidate', 'patient', 'client', etc.
+  label: string; // 'Candidate', 'Patient', 'Client'
+  pluralLabel: string; // 'Candidates', 'Patients', 'Clients'
+  fields: FieldDefinition[];
+  pipelines: PipelineConfig[];
+}
+```
+
+**Migration Path**:
+1. Create field definition system
+2. Move hardcoded fields to config
+3. Generate TypeScript types from config (optional)
+4. Update forms to render from config
+
+---
+
+### 2.4 Navigation & Routes
+**Current**: Hardcoded routes in `App.tsx`
+
+**Abstraction Strategy**:
+
+```typescript
+interface RouteConfig {
+  path: string;
+  label: string;
+  icon?: string;
+  component: string; // Component name
+  requiredRole?: string[];
+  showInNav?: boolean;
+}
+
+interface NavigationConfig {
+  routes: RouteConfig[];
+  sidebarGroups?: NavigationGroup[];
+}
+```
+
+**Migration Path**:
+1. Extract routes to config
+2. Generate routes dynamically from config
+3. Generate sidebar from config
+
+---
+
+### 2.5 Status Options & Colors
+**Current**: Hardcoded in `StatusBadge.tsx`, `theme.ts`
+
+**Abstraction Strategy**:
+
+```typescript
+interface StatusConfig {
+  [statusId: string]: {
+    label: string;
+    color: string;
+    bgColor: string;
+    borderColor?: string;
+  };
+}
+
+// Move to config file
+const statusConfig: StatusConfig = {
+  'pending': { label: 'Pending', color: 'text-yellow-700', bgColor: 'bg-yellow-100' },
+  'completed': { label: 'Completed', color: 'text-green-700', bgColor: 'bg-green-100' },
+  // ...
+};
+```
+
+---
+
+### 2.6 User Roles
+**Current**: `'Admin' | 'Receptionist' | 'Broker'`
+
+**Abstraction Strategy**:
+
+```typescript
+interface RoleConfig {
+  id: string;
+  label: string;
+  permissions: Permission[];
+}
+
+interface IndustryConfig {
+  roles: RoleConfig[];
+  // ...
+}
+```
+
+---
+
+## 3. INDUSTRY PLUG-INS (Optional Features)
+
+These are recruitment-specific features that can be extracted as optional modules.
+
+### 3.1 Recruitment-Specific Features
+
+#### 3.1.1 CV Builder
+**Location**: `client/src/pages/CVBuilderPage.tsx`
+**Status**: Industry-specific
+**Strategy**: Extract as optional plugin
+- Keep as-is in recruitment config
+- Remove from core
+- Create plugin interface for document builders
+
+#### 3.1.2 Job Generator
+**Location**: `client/src/pages/JobGeneratorPage.tsx`
+**Status**: Industry-specific
+**Strategy**: Extract as optional plugin
+- Recruitment-specific job posting generator
+- Can be replaced with generic "Opportunity Generator" plugin
+
+#### 3.1.3 WhatsApp Integration
+**Location**: `client/src/pages/WhatsAppPage.tsx`
+**Status**: Industry-specific (but communication is generic)
+**Strategy**: 
+- Extract communication patterns to core
+- Keep WhatsApp-specific UI as plugin
+- Create generic "Messaging" plugin interface
+
+#### 3.1.4 Appointment Types
+**Current**: `'Interview' | 'Medical' | 'Document Review' | 'Orientation'`
+**Strategy**: Make configurable
+- Move to `IndustryConfig.appointmentTypes`
+
+#### 3.1.5 Recruitment-Specific Fields
+**Examples**:
+- `passportNumber`, `countryApplyingTo`, `departureDate`
+- `fullNameArabic`, `nationality`, `religion`
+- `workPosition`, `workCountry`, `workYears`
+
+**Strategy**: Move to field definitions in config
+- Core supports any fields via `metadata` or config-driven fields
+- Recruitment config defines these specific fields
+
+---
+
+### 3.2 Reports & Analytics
+**Location**: `client/src/pages/ReportsPage.tsx`, `client/src/services/reportService.ts`
+
+**Status**: Mix of generic and industry-specific
+**Strategy**:
+- Extract generic report framework (date ranges, filters, exports)
+- Keep recruitment-specific queries as config/plugins
+- Create report query builder interface
+
+---
+
+## 4. CONFIGURATION ARCHITECTURE
+
+### 4.1 Configuration Structure
+
+```
+client/src/config/
+  ├── industries/
+  │   ├── recruitment.ts      # Recruitment industry config
+  │   ├── healthcare.ts       # Example: Healthcare config
+  │   └── realestate.ts       # Example: Real estate config
+  ├── core/
+  │   ├── entities.ts         # Core entity definitions
+  │   ├── pipelines.ts        # Pipeline configuration schema
+  │   └── fields.ts           # Field definition schema
+  └── index.ts                # Configuration loader
+```
+
+### 4.2 Configuration Example
+
+```typescript
+// client/src/config/industries/recruitment.ts
+export const recruitmentConfig: IndustryConfig = {
+  name: 'Recruitment CRM',
+  entities: {
+    primary: {
+      type: 'candidate',
+      label: 'Candidate',
+      pluralLabel: 'Candidates',
+      fields: [
+        { id: 'name', label: 'Full Name', type: 'text', required: true },
+        { id: 'email', label: 'Email', type: 'email' },
+        { id: 'phone', label: 'Phone', type: 'phone' },
+        { id: 'passportNumber', label: 'Passport Number', type: 'text', category: 'Documents' },
+        // ... 60+ fields
+      ],
+      pipelines: [{
+        id: 'candidate-pipeline',
+        name: 'Candidate Pipeline',
+        stages: [
+          { id: 'onboarding', label: 'Onboarding', color: 'blue', bgColor: 'bg-blue-100', order: 1 },
+          { id: 'interviewing', label: 'Interviewing', color: 'yellow', bgColor: 'bg-yellow-100', order: 2 },
+          { id: 'offer', label: 'Offer', color: 'purple', bgColor: 'bg-purple-100', order: 3 },
+          { id: 'hired', label: 'Hired', color: 'green', bgColor: 'bg-green-100', order: 4, isTerminal: true },
+          { id: 'rejected', label: 'Rejected', color: 'red', bgColor: 'bg-red-100', order: 5, isTerminal: true },
+        ]
+      }]
+    },
+    secondary: [{
+      type: 'job',
+      label: 'Job',
+      pluralLabel: 'Jobs',
+      // ...
+    }]
+  },
+  routes: [
+    { path: '/candidates', label: 'Candidates', component: 'CandidatesPage', showInNav: true },
+    { path: '/jobs', label: 'Jobs', component: 'JobsPage', showInNav: true },
+    // ...
+  ],
+  roles: [
+    { id: 'admin', label: 'Admin', permissions: ['*'] },
+    { id: 'receptionist', label: 'Receptionist', permissions: ['read:candidates', 'create:candidates'] },
+    { id: 'broker', label: 'Broker', permissions: ['read:candidates'] },
+  ],
+  plugins: [
+    'cv-builder',
+    'job-generator',
+    'whatsapp-integration'
+  ]
+};
+```
+
+---
+
+## 5. MIGRATION STRATEGY
+
+### Phase 1: Extract Configuration (No Breaking Changes)
+1. Create `config/` directory structure
+2. Extract hardcoded values to config files
+3. Create configuration loader
+4. Update components to read from config (with fallbacks)
+5. **Result**: App still works, but configurable
+
+### Phase 2: Abstract Entity Types
+1. Create generic `Entity` interface
+2. Create entity service abstraction layer
+3. Map `Candidate` → `Entity` via adapter
+4. Gradually migrate services to use `Entity`
+5. **Result**: Core services work with generic entities
+
+### Phase 3: Rename & Refactor
+1. Rename `Candidate` → `Person` (or keep as config label)
+2. Rename `Job` → `Opportunity` (or remove if not needed)
+3. Update all references
+4. **Result**: Domain-agnostic naming
+
+### Phase 4: Extract Plugins
+1. Identify recruitment-specific features
+2. Create plugin interface
+3. Extract features to plugins
+4. Load plugins from config
+5. **Result**: Optional industry features
+
+---
+
+## 6. KEY DECISIONS & RECOMMENDATIONS
+
+### 6.1 Entity Naming
+**Recommendation**: Keep `Candidate` as a configurable label, but use `Entity` internally
+- Less disruptive than renaming everywhere
+- Industry config defines what "Candidate" means
+- Core code uses `Entity` type
+
+### 6.2 Field Storage Strategy
+**Option A**: Flexible `metadata` object (simple, but loses type safety)
+**Option B**: Config-driven fields with generated types (complex, but type-safe)
+**Recommendation**: Hybrid approach
+- Core fields (id, name, email, stage) in main object
+- Industry-specific fields in `metadata` or config-driven fields
+- Generate TypeScript types from config (optional)
+
+### 6.3 Pipeline System
+**Recommendation**: Config-driven pipelines
+- Core provides pipeline engine
+- Industry config defines stages
+- Supports multiple pipelines per entity type
+
+### 6.4 Backward Compatibility
+**Critical**: Maintain backward compatibility during migration
+- Keep existing APIs working
+- Add new abstraction layers alongside old code
+- Gradual migration, not big bang rewrite
+
+---
+
+## 7. FILE MAPPING SUMMARY
+
+### Core (Keep As-Is, Already Generic)
+- `firebase/firestore.ts` - Generic CRUD
+- `firebase/storage.ts` - File handling
+- `services/taskService.ts` - Generic tasks
+- `services/documentService.ts` - Generic documents
+- `services/syncAllServices.ts` - Sync orchestration
+- `contexts/AuthContext.tsx` - Authentication
+- `contexts/NotificationContext.tsx` - Notifications
+- `contexts/SettingsContext.tsx` - Settings
+- `components/ui/*` - UI components
+- `components/layout/*` - Layout components
+- `utils/searchUtils.ts` - Search
+- `utils/recycleBin.ts` - Soft delete
+- `utils/localStorage.ts` - Storage wrapper
+
+### Configurable (Extract to Config)
+- `types/index.ts` - Entity types → Config
+- `components/ui/StatusBadge.tsx` - Status options → Config
+- `styles/theme.ts` - Colors → Config (optional)
+- `App.tsx` - Routes → Config
+- `components/layout/Sidebar.tsx` - Menu items → Config
+
+### Industry Plugins (Extract as Optional)
+- `pages/CVBuilderPage.tsx` - CV Builder plugin
+- `pages/JobGeneratorPage.tsx` - Job Generator plugin
+- `pages/WhatsAppPage.tsx` - WhatsApp plugin
+- Recruitment-specific fields in `Candidate` interface
+
+### Services to Abstract
+- `services/candidateService.ts` → `services/entityService.ts` (generic)
+- `services/jobService.ts` → Remove or make generic `opportunityService.ts`
+- `services/appointmentService.ts` → `services/eventService.ts` (generic)
+
+---
+
+## 8. NEXT STEPS
+
+1. **Review this map** with team
+2. **Create configuration system** (Phase 1)
+3. **Extract first config** (e.g., status options)
+4. **Test backward compatibility**
+5. **Iterate** on abstraction layers
+6. **Document** configuration format
+7. **Create** example industry configs
+
+---
+
+## 9. RISKS & MITIGATION
+
+### Risk 1: Breaking Existing Functionality
+**Mitigation**: 
+- Incremental migration
+- Feature flags for new abstractions
+- Comprehensive testing at each phase
+
+### Risk 2: Over-Engineering
+**Mitigation**:
+- Start with simple config extraction
+- Add complexity only when needed
+- Keep core simple and generic
+
+### Risk 3: Performance Impact
+**Mitigation**:
+- Config loading happens at startup
+- Cache configurations
+- Lazy load plugin code
+
+### Risk 4: Type Safety Loss
+**Mitigation**:
+- Use TypeScript generics
+- Generate types from config (optional)
+- Strong typing for core entities
+
+---
+
+## Conclusion
+
+The codebase is well-structured for extraction. Most infrastructure is already generic. The main work is:
+1. **Extracting configuration** (labels, pipelines, fields)
+2. **Abstracting entity types** (Candidate → Entity)
+3. **Creating plugin system** (for industry-specific features)
+
+**Estimated Effort**: 
+- Phase 1 (Config extraction): 2-3 weeks
+- Phase 2 (Entity abstraction): 3-4 weeks  
+- Phase 3 (Rename/Refactor): 2-3 weeks
+- Phase 4 (Plugins): 2-3 weeks
+
+**Total**: ~10-13 weeks for full extraction (can be done incrementally)
+
+
+
+# Architecture Summary - Core vs Industry-Specific
+
+## Visual Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    INDUSTRY PLUG-INS                            │
+│  (Optional, Recruitment-Specific Features)                      │
+├─────────────────────────────────────────────────────────────────┤
+│  • CV Builder          • Job Generator                          │
+│  • WhatsApp Integration • Recruitment Reports                   │
+│  • Recruitment Fields  • Appointment Types                      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ loads
+┌─────────────────────────────────────────────────────────────────┐
+│                  CONFIGURABLE LAYER                             │
+│  (Industry-Neutral Abstractions)                                │
+├─────────────────────────────────────────────────────────────────┤
+│  • Entity Types (Candidate → Person/Entity)                     │
+│  • Pipelines (Onboarding → Configurable Stages)               │
+│  • Field Definitions (60+ fields → Config-driven)              │
+│  • Status Options (Hardcoded → Config)                         │
+│  • Navigation Routes (Hardcoded → Config)                     │
+│  • User Roles (Admin/Receptionist → Config)                    │
+│  • Labels & Text (Hardcoded → i18n-ready)                      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ uses
+┌─────────────────────────────────────────────────────────────────┐
+│                      CORE LAYER                                 │
+│  (Domain-Agnostic Infrastructure)                               │
+├─────────────────────────────────────────────────────────────────┤
+│  Firebase Layer                                                 │
+│  • firestore.ts (Generic CRUD)                                 │
+│  • storage.ts (File handling)                                  │
+│                                                                 │
+│  Service Layer                                                  │
+│  • entityService.ts (Generic CRUD)                             │
+│  • taskService.ts (Generic tasks)                              │
+│  • documentService.ts (Generic documents)                       │
+│  • eventService.ts (Generic calendar events)                    │
+│  • syncAllServices.ts (Real-time sync)                          │
+│                                                                 │
+│  Context Layer                                                  │
+│  • AuthContext (Authentication)                                 │
+│  • NotificationContext (Notifications)                          │
+│  • SettingsContext (App settings)                               │
+│                                                                 │
+│  UI Layer                                                       │
+│  • Button, Input, Card (Generic components)                    │
+│  • Layout, Header, Sidebar (Layout components)                  │
+│  • StatusBadge (Config-driven)                                  │
+│                                                                 │
+│  Utilities                                                      │
+│  • searchUtils (Generic search)                                │
+│  • recycleBin (Soft delete)                                     │
+│  • localStorage (Storage wrapper)                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Module Classification
+
+### ✅ CORE (Already Generic - No Changes Needed)
+
+| Module | Location | Status |
+|--------|----------|--------|
+| Firebase CRUD | `firebase/firestore.ts` | ✅ Generic |
+| File Storage | `firebase/storage.ts` | ✅ Generic |
+| Task Service | `services/taskService.ts` | ✅ Generic |
+| Document Service | `services/documentService.ts` | ✅ Generic |
+| Sync Orchestration | `services/syncAllServices.ts` | ✅ Generic |
+| Authentication | `contexts/AuthContext.tsx` | ✅ Generic |
+| Notifications | `contexts/NotificationContext.tsx` | ✅ Generic |
+| Settings | `contexts/SettingsContext.tsx` | ✅ Generic |
+| UI Components | `components/ui/*` | ✅ Generic |
+| Layout | `components/layout/*` | ✅ Generic |
+| Search Utils | `utils/searchUtils.ts` | ✅ Generic |
+| Recycle Bin | `utils/recycleBin.ts` | ✅ Generic |
+
+### 🔧 CONFIGURABLE (Extract to Config)
+
+| Module | Current State | Target State |
+|--------|---------------|--------------|
+| Entity Types | `Candidate`, `Job` hardcoded | `Entity` + Config |
+| Pipelines | `CandidateStage` enum | Config-driven stages |
+| Status Options | Hardcoded in `StatusBadge.tsx` | Config file |
+| Field Definitions | 60+ fields in interface | Config-driven fields |
+| Routes | Hardcoded in `App.tsx` | Config-driven routes |
+| Navigation | Hardcoded in `Sidebar.tsx` | Config-driven menu |
+| User Roles | `'Admin' | 'Receptionist'` | Config-driven roles |
+| Labels | Hardcoded strings | i18n-ready config |
+
+### 🔌 INDUSTRY PLUGINS (Extract as Optional)
+
+| Feature | Location | Strategy |
+|---------|----------|----------|
+| CV Builder | `pages/CVBuilderPage.tsx` | Extract as plugin |
+| Job Generator | `pages/JobGeneratorPage.tsx` | Extract as plugin |
+| WhatsApp | `pages/WhatsAppPage.tsx` | Extract as plugin |
+| Recruitment Fields | `types/index.ts` (Candidate) | Move to config |
+| Appointment Types | `types/index.ts` | Move to config |
+
+## Abstraction Examples
+
+### Example 1: Entity Type Abstraction
+
+**Before (Industry-Specific)**:
+```typescript
+interface Candidate {
+  id: string;
+  name: string;
+  email: string;
+  stage: 'Onboarding' | 'Interviewing' | 'Offer' | 'Hired';
+  passportNumber?: string; // Recruitment-specific
+  countryApplyingTo?: string; // Recruitment-specific
+}
+```
+
+**After (Generic + Config)**:
+```typescript
+// Core (Generic)
+interface Entity {
+  id: string;
+  name: string;
+  email?: string;
+  stage: string; // From config
+  metadata: Record<string, any>; // Flexible storage
+}
+
+// Config (Industry-Specific)
+const recruitmentConfig = {
+  entities: {
+    primary: {
+      type: 'candidate',
+      label: 'Candidate',
+      fields: [
+        { id: 'passportNumber', label: 'Passport Number', type: 'text' },
+        { id: 'countryApplyingTo', label: 'Country Applying To', type: 'text' },
+      ]
+    }
+  }
+}
+```
+
+### Example 2: Pipeline Abstraction
+
+**Before (Hardcoded)**:
+```typescript
+type CandidateStage = 'Onboarding' | 'Interviewing' | 'Offer' | 'Hired' | 'Rejected';
+```
+
+**After (Config-Driven)**:
+```typescript
+// Core (Generic)
+interface PipelineStage {
+  id: string;
+  label: string;
+  color: string;
+  order: number;
+}
+
+// Config (Industry-Specific)
+const recruitmentPipeline = {
+  stages: [
+    { id: 'onboarding', label: 'Onboarding', color: 'blue', order: 1 },
+    { id: 'interviewing', label: 'Interviewing', color: 'yellow', order: 2 },
+    // ...
+  ]
+}
+```
+
+### Example 3: Service Abstraction
+
+**Before (Industry-Specific)**:
+```typescript
+// candidateService.ts
+export const addCandidate = async (candidate: Candidate) => { ... }
+export const updateCandidate = async (id: string, updates: Partial<Candidate>) => { ... }
+```
+
+**After (Generic)**:
+```typescript
+// entityService.ts
+export const addEntity = async <T extends Entity>(
+  entityType: string,
+  entity: Omit<T, 'id'>
+) => { ... }
+
+export const updateEntity = async <T extends Entity>(
+  entityType: string,
+  id: string,
+  updates: Partial<T>
+) => { ... }
+```
+
+## Migration Priority
+
+### Priority 1: Low Risk, High Value
+1. ✅ Extract status options to config
+2. ✅ Extract pipeline stages to config
+3. ✅ Extract navigation routes to config
+4. ✅ Extract user roles to config
+
+**Impact**: Makes app configurable without breaking changes
+
+### Priority 2: Medium Risk, High Value
+1. 🔧 Abstract entity service (Candidate → Entity)
+2. 🔧 Create field definition system
+3. 🔧 Extract labels to config
+
+**Impact**: Enables multi-industry support
+
+### Priority 3: Lower Priority
+1. 🔌 Extract CV Builder as plugin
+2. 🔌 Extract Job Generator as plugin
+3. 🔌 Extract WhatsApp as plugin
+
+**Impact**: Clean separation of industry-specific features
+
+## Configuration File Structure
+
+```
+config/
+├── core/
+│   ├── entities.ts          # Core entity schema
+│   ├── pipelines.ts        # Pipeline schema
+│   └── fields.ts            # Field definition schema
+├── industries/
+│   ├── recruitment.ts       # Recruitment config
+│   ├── healthcare.ts        # Example: Healthcare
+│   └── realestate.ts        # Example: Real Estate
+└── index.ts                 # Config loader
+```
+
+## Key Principles
+
+1. **Preserve Proven Patterns**: Don't rewrite working code
+2. **Incremental Migration**: Change one layer at a time
+3. **Backward Compatible**: Keep existing APIs working
+4. **Configuration Over Code**: Extract hardcoded values
+5. **Plugin Architecture**: Isolate industry-specific features
+
+## Success Metrics
+
+- ✅ Core modules have zero industry-specific code
+- ✅ All labels/pipelines/fields come from config
+- ✅ Can switch industries by changing config file
+- ✅ Existing functionality remains intact
+- ✅ Type safety maintained throughout
+

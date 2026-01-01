@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Wellness Evaluation Form</title>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .page-container {
+            background: white;
+            width: 210mm; /* A4 width */
+            min-height: 297mm; /* A4 height */
+            padding: 10mm;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+            display: flex;
+            gap: 15px;
+        }
+
+        /* --- LEFT COLUMN --- */
+        .left-col {
+            width: 55%;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .header-box {
+            border: 2px solid #000;
+            background: #ddd;
+            padding: 5px;
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        /* Main Data Table */
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+
+        table.data-table th, table.data-table td {
+            border: 1px solid #000;
+            text-align: center;
+            padding: 2px;
+            height: 20px;
+        }
+
+        table.data-table th {
+            background: #e0e0e0;
+            font-weight: normal;
+            vertical-align: middle;
+        }
+
+        /* Icons placeholder styles */
+        .icon-placeholder {
+            font-size: 16px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        /* Inputs inside table cells */
+        input {
+            width: 100%;
+            border: none;
+            background: transparent;
+            text-align: center;
+            font-family: inherit;
+            font-size: inherit;
+            outline: none;
+            height: 100%;
+        }
+
+        /* Evaluation Table */
+        table.eval-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        table.eval-table th, table.eval-table td {
+            border: 1px solid #000;
+            text-align: center;
+            padding: 4px;
+        }
+
+        .bg-grey { background: #d9d9d9; font-weight: bold; }
+        .bg-excellent { background: #ffff99; } /* Yellow */
+        .bg-good { background: #ffcc99; } /* Light Orange */
+        .bg-medium { background: #ff9966; } /* Orange */
+        .bg-bad { background: #ff6666; } /* Red-ish */
+        .bg-alarming { background: #cc0000; color: white; } /* Dark Red */
+
+        /* Checkbox styling */
+        input[type="checkbox"] {
+            width: 15px; height: 15px;
+        }
+
+        /* --- RIGHT COLUMN --- */
+        .right-col {
+            width: 45%;
+            font-size: 11px;
+        }
+
+        .section-header {
+            background: #d9d9d9;
+            border: 1px solid #000;
+            padding: 3px 5px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .section-icon {
+            margin-right: 5px;
+            font-size: 14px;
+        }
+
+        /* Body Fat Table */
+        table.bf-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        table.bf-table th, table.bf-table td {
+            border: 1px solid #000;
+            padding: 2px;
+        }
+
+        .bf-green { background: #ccffcc; }
+        .bf-blue { background: #ccffff; }
+        .bf-yellow { background: #ffffcc; }
+        .bf-orange { background: #ffcc99; }
+        
+        .legend-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            margin-top: 5px;
+            text-align: center;
+        }
+        .legend-table td { border: 1px solid #000; }
+
+        /* Water Index */
+        .water-chart {
+            margin: 10px 0;
+            font-size: 10px;
+        }
+        .water-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .water-label { width: 60px; font-weight: bold; }
+        .water-bar-container { flex-grow: 1; position: relative; height: 15px; }
+        .water-ticks {
+            display: flex;
+            justify-content: space-between;
+            margin-left: 60px;
+            margin-bottom: 2px;
+            font-size: 9px;
+            font-weight: bold;
+        }
+        /* Visual simulation of the blue bars */
+        .bar-gradient {
+            height: 10px;
+            width: 100%;
+            background: repeating-linear-gradient(
+                90deg,
+                #99ccff,
+                #99ccff 2px,
+                #fff 2px,
+                #fff 4px
+            );
+            border: 1px solid #ccc;
+        }
+        
+        .black-mark {
+            height: 10px;
+            width: 20px;
+            background: black;
+            position: absolute;
+            top: 0;
+        }
+
+        /* Muscle Index Text */
+        .muscle-section {
+            font-size: 10px;
+            line-height: 1.3;
+        }
+        .rating-box {
+            border: 2px solid #a00;
+            padding: 5px;
+            margin: 5px 0;
+        }
+        .rating-columns {
+            display: flex;
+            justify-content: space-between;
+        }
+        .col-red { color: #a00; font-weight: bold; }
+        .col-green { color: green; font-weight: bold; }
+        .col-black { color: black; font-weight: bold; }
+
+        /* Print Styles */
+        @media print {
+            body { background: white; padding: 0; }
+            .page-container { box-shadow: none; width: 100%; height: auto; padding: 0; }
+            /* Hides placeholder text in inputs when printing if empty */
+            input::placeholder { color: transparent; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="page-container">
+        <!-- Left Column -->
+        <div class="left-col">
+            <div class="header-box">Please bring along this Pass to your next appointment</div>
+
+            <!-- Main Data Entry Table -->
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th rowspan="2" style="width: 30px;">Age:<br><input type="text"></th>
+                        <th rowspan="2" style="width: 30px;">Height<br>cm:<br><input type="text"></th>
+                        <th><span class="icon-placeholder">⚖️</span><br>% Body Fat<br>Range</th>
+                        <th><span class="icon-placeholder">💧</span><br>% Body Water<br>Range</th>
+                        <th><span class="icon-placeholder">💪</span><br>Muscle Mass</th>
+                        <th><span class="icon-placeholder">👤</span><br>Physique Ratings</th>
+                        <th><span class="icon-placeholder">🔥</span><br>BMR</th>
+                        <th><span class="icon-placeholder">⏳</span><br>Basal Age</th>
+                        <th><span class="icon-placeholder">🦴</span><br>Bone Mass</th>
+                        <th><span class="icon-placeholder">❤️</span><br>Visceral Fat</th>
+                    </tr>
+                    <tr>
+                        <th>%</th>
+                        <th>%</th>
+                        <th>kg</th>
+                        <th>(1-9)</th>
+                        <th>kcal</th>
+                        <th>Years</th>
+                        <th>kg</th>
+                        <th>Lvl</th>
+                    </tr>
+                    <tr>
+                        <th rowspan="2">Next<br>Appt:</th>
+                        <th rowspan="2">Weight<br>KG</th>
+                        <th colspan="8" style="background: #fff; height: 5px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Generate empty rows for data entry -->
+                    <script>
+                        for(let i=0; i<18; i++) {
+                            document.write('<tr>');
+                            document.write('<td><input type="text"></td>'); // Date/Appt
+                            document.write('<td><input type="text"></td>'); // Weight
+                            for(let j=0; j<8; j++) {
+                                document.write('<td><input type="text"></td>');
+                            }
+                            document.write('</tr>');
+                        }
+                    </script>
+                </tbody>
+            </table>
+
+            <!-- Evaluation Section -->
+            <table class="eval-table">
+                <tr>
+                    <th class="bg-grey" style="width: 25%; text-align: left; padding-left: 10px;">Evaluation</th>
+                    <th class="bg-excellent">excellent</th>
+                    <th class="bg-good">good</th>
+                    <th class="bg-medium">medium</th>
+                    <th class="bg-bad">bad</th>
+                    <th class="bg-alarming">alarming</th>
+                </tr>
+                <tr>
+                    <td class="bg-grey">Body Fat</td>
+                    <td class="bg-excellent"><input type="checkbox"></td>
+                    <td class="bg-good"><input type="checkbox"></td>
+                    <td class="bg-medium"><input type="checkbox"></td>
+                    <td class="bg-bad"><input type="checkbox"></td>
+                    <td class="bg-alarming"><input type="checkbox"></td>
+                </tr>
+                <tr>
+                    <td class="bg-grey">Body Water</td>
+                    <td class="bg-excellent"><input type="checkbox"></td>
+                    <td class="bg-good"><input type="checkbox"></td>
+                    <td class="bg-medium"><input type="checkbox"></td>
+                    <td class="bg-bad"><input type="checkbox"></td>
+                    <td class="bg-alarming"><input type="checkbox"></td>
+                </tr>
+                <tr>
+                    <td class="bg-grey">Muscle Mass</td>
+                    <td class="bg-excellent"><input type="checkbox"></td>
+                    <td class="bg-good"><input type="checkbox"></td>
+                    <td class="bg-medium"><input type="checkbox"></td>
+                    <td class="bg-bad"><input type="checkbox"></td>
+                    <td class="bg-alarming"><input type="checkbox"></td>
+                </tr>
+                <tr>
+                    <td class="bg-grey">Visceral Fat</td>
+                    <td class="bg-excellent"><input type="checkbox"></td>
+                    <td class="bg-good"><input type="checkbox"></td>
+                    <td class="bg-medium"><input type="checkbox"></td>
+                    <td class="bg-bad"><input type="checkbox"></td>
+                    <td class="bg-alarming"><input type="checkbox"></td>
+                </tr>
+                <tr>
+                    <td class="bg-grey">Questionnaire</td>
+                    <td class="bg-excellent"><input type="checkbox"></td>
+                    <td class="bg-good"><input type="checkbox"></td>
+                    <td class="bg-medium"><input type="checkbox"></td>
+                    <td class="bg-bad"><input type="checkbox"></td>
+                    <td class="bg-alarming"><input type="checkbox"></td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- Right Column -->
+        <div class="right-col">
+            
+            <!-- Body Fat Range -->
+            <div class="section-header">
+                <span class="section-icon">%</span> Body Fat Range:
+            </div>
+            
+            <table class="bf-table">
+                <thead>
+                    <tr>
+                        <th colspan="4" style="background:#ddd">Women</th>
+                        <th rowspan="2" style="background:#ddd">AGE</th>
+                        <th colspan="4" style="background:#ddd">Men</th>
+                    </tr>
+                    <tr style="font-size: 8px;">
+                        <th class="bf-green">excellent</th><th class="bf-blue">healthy</th><th class="bf-yellow">medium</th><th class="bf-orange">obese</th>
+                        <th class="bf-green">excellent</th><th class="bf-blue">healthy</th><th class="bf-yellow">medium</th><th class="bf-orange">obese</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>18.2</td><td>22.1</td><td>25.0</td><td>> 29.6</td><td style="background:#ffff99">20 - 24</td><td>10.8</td><td>14.9</td><td>19.0</td><td>> 23.3</td></tr>
+                    <tr><td>18.9</td><td>22.0</td><td>25.4</td><td>> 29.8</td><td style="background:#ffff99">25 - 29</td><td>12.8</td><td>16.5</td><td>20.3</td><td>> 24.3</td></tr>
+                    <tr><td>19.7</td><td>22.7</td><td>26.4</td><td>> 30.5</td><td style="background:#ffff99">30 - 34</td><td>14.5</td><td>18.0</td><td>21.5</td><td>> 25.2</td></tr>
+                    <tr><td>21.1</td><td>24.0</td><td>27.7</td><td>> 31.5</td><td style="background:#ffff99">35 - 39</td><td>16.1</td><td>19.3</td><td>22.6</td><td>> 26.1</td></tr>
+                    <tr><td>22.6</td><td>25.6</td><td>29.3</td><td>> 32.8</td><td style="background:#ffff99">40 - 44</td><td>17.5</td><td>20.5</td><td>23.6</td><td>> 26.9</td></tr>
+                    <tr><td>24.3</td><td>27.3</td><td>30.9</td><td>> 34.1</td><td style="background:#ffff99">45 - 49</td><td>18.6</td><td>21.5</td><td>24.5</td><td>> 27.6</td></tr>
+                    <tr><td>25.2</td><td>28.2</td><td>31.8</td><td>> 35.1</td><td style="background:#ffff99">50 - 54</td><td>19.2</td><td>22.1</td><td>25.1</td><td>> 28.2</td></tr>
+                    <tr><td>26.6</td><td>29.7</td><td>33.1</td><td>> 36.2</td><td style="background:#ffff99">55 - 59</td><td>19.8</td><td>22.7</td><td>25.6</td><td>> 28.7</td></tr>
+                    <tr><td>27.4</td><td>30.7</td><td>34.0</td><td>> 37.3</td><td style="background:#ffff99">60 +</td><td>20.2</td><td>23.3</td><td>26.2</td><td>> 29.3</td></tr>
+                </tbody>
+            </table>
+            
+            <div style="font-size: 9px; margin-bottom: 5px;">
+                For Sports people (measured in athletic modus) with a minimum training from 10 hours a week the Index is valid: Women 11 to 18% / Men: 5 to 15% (University of Cambridge, 1999)
+            </div>
+
+            <table class="legend-table">
+                <tr>
+                    <td class="bf-green" style="width: 25%">-</td>
+                    <td class="bf-blue" style="width: 25%">0</td>
+                    <td class="bf-yellow" style="width: 25%">+</td>
+                    <td class="bf-orange" style="width: 25%">++</td>
+                </tr>
+                <tr>
+                    <td>Under</td>
+                    <td>Healthy</td>
+                    <td>Over</td>
+                    <td>Obese</td>
+                </tr>
+            </table>
+
+            <!-- Water Index -->
+            <br>
+            <div class="section-header">
+                <span class="section-icon">%</span> Water Index:
+            </div>
+            
+            <div class="water-chart">
+                <div class="water-ticks">
+                    <span>30%</span><span>40%</span><span>50%</span><span>60%</span><span>70%</span><span>80%</span><span>90%</span>
+                </div>
+                
+                <div class="water-row">
+                    <span class="water-label">Women</span>
+                    <div class="water-bar-container">
+                        <div class="bar-gradient"></div>
+                        <div class="black-mark" style="left: 30%; width: 35%;"></div> <!-- 45 to 60 approx -->
+                    </div>
+                </div>
+                <div class="water-row">
+                    <span class="water-label">Men</span>
+                    <div class="water-bar-container">
+                        <div class="bar-gradient"></div>
+                        <div class="black-mark" style="left: 40%; width: 25%;"></div> <!-- 50 to 65 approx -->
+                    </div>
+                </div>
+                <div class="water-row">
+                    <span class="water-label">Children</span>
+                    <div class="water-bar-container">
+                        <div class="bar-gradient"></div>
+                        <div class="black-mark" style="left: 55%; width: 25%;"></div> <!-- 60 to 75 approx -->
+                    </div>
+                </div>
+                <div style="text-align: left; font-size: 8px; color: #666;">WHO 2001</div>
+            </div>
+
+            <!-- Muscle Index -->
+            <br>
+            <div class="section-header">
+                <span class="section-icon">💪</span> Muscle Index & Physique Ratings:
+            </div>
+            <div class="muscle-section">
+                The Muscle Index is given in kg, the value belonging to it is the Physique Ratings:
+                
+                <div class="rating-box">
+                    <div class="rating-columns">
+                        <div class="col-red">
+                            <div style="border-bottom: 1px solid #000; margin-bottom: 2px;">obese, untrained</div>
+                            1 Hidden Obese<br>
+                            2 Obese<br>
+                            3 Solidly-built
+                        </div>
+                        <div class="col-green">
+                            <div style="border-bottom: 1px solid #000; margin-bottom: 2px;">normal</div>
+                            4 Under exercised<br>
+                            5 Standard<br>
+                            6 Standard Muscular
+                        </div>
+                        <div class="col-black">
+                            <div style="border-bottom: 1px solid #000; margin-bottom: 2px; color: #a00;">excellent</div>
+                            7 Thin<br>
+                            8 Thin & muscular<br>
+                            9 Very muscular
+                        </div>
+                    </div>
+                </div>
+
+                <div style="font-size: 9px; text-align: justify;">
+                    <strong>Why is monitoring Muscle Mass important?</strong> For every extra KG of muscle gained the body uses approximately 100 extra calories a day. Everybody who experiences a change in the muscle mass should monitor and adapt the calorie intake accordingly. Because muscle is denser than fat, monitoring your muscle mass gives you a more accurate understanding of your overall body compositions and changes in your total body weight.
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
