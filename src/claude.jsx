@@ -12,7 +12,7 @@ import wellnessLogo from "../SAMPLES/LOGO-removebg-preview.png";
 
 const WellnessForm = () => {
   const [currentPage, setCurrentPage] = useState(1);
-  const [appointments, setAppointments] = useState(Array(28).fill({
+  const [appointments, setAppointments] = useState(Array(26).fill({
     age: '', height: '', weight: '', bodyFat: '', water: '', muscle: '', 
     physique: '', bmr: '', basal: '', bone: '', visceral: ''
   }));
@@ -53,7 +53,7 @@ const WellnessForm = () => {
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen">
+    <div className="bg-gray-100">
       {/* Page Navigation */}
       <div className="flex justify-center gap-4 p-4 print:hidden">
         <button 
@@ -134,7 +134,7 @@ const WellnessForm = () => {
               </div>
 
               {/* Data Rows */}
-              {appointments.slice(0, 28).map((apt, idx) => (
+              {appointments.slice(0, 26).map((apt, idx) => (
                 <div key={idx} className="grid grid-cols-11 text-xs border-b border-gray-300">
                   <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.age} onChange={(e) => updateAppointment(idx, 'age', e.target.value)} />
                   <input className="border-r border-black p-0.5 text-center w-full text-xs" value={apt.height} onChange={(e) => updateAppointment(idx, 'height', e.target.value)} />
@@ -186,7 +186,7 @@ const WellnessForm = () => {
             </div>
 
             {/* Right Section */}
-            <div>
+            <div className="flex flex-col h-full">
               {/* Body Fat Range Table */}
               <div className="border-2 border-black mb-3">
                 <div className="p-2 flex items-center gap-2 text-sm font-normal">
@@ -393,7 +393,7 @@ const WellnessForm = () => {
               </div>
 
                             {/* Muscle Index */}
-              <div className="border-2 border-black">
+              <div className="border-2 border-black flex-1 flex flex-col">
                 <div className="p-2 flex items-center gap-2 text-sm font-normal">
                   <img src={muscleMassIcon} alt="Muscle mass" className="h-9 w-9 object-contain" />
                   <span className="font-bold">Muscle Index & Physique Ratings:</span>
@@ -606,6 +606,16 @@ const WellnessForm = () => {
       )}
 
       <style>{`
+        html, body, #root {
+          height: auto;
+          overflow-y: auto;
+        }
+        .page-break,
+        .max-w-7xl,
+        .max-w-4xl,
+        .bg-gray-100 {
+          overflow: visible;
+        }
         @media print {
           .page-break {
             page-break-after: always;
