@@ -1,6 +1,19 @@
-import React, { useEffect, useReducer } from "react";
+import React, { useEffect, useReducer, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { Download } from "lucide-react";
+import { Download, Mail, Phone } from "lucide-react";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc
+} from "firebase/firestore";
+import { db } from "./firebase";
 // import { registerSW } from "virtual:pwa-register";
 import bodyFatRangeIcon from "../SAMPLES/ICONS/Body_Fat_Range_Icon-removebg-preview.png";
 import bodyWaterRangeIcon from "../SAMPLES/ICONS/Body_Water_Range_Icon-removebg-preview.png";
@@ -12,8 +25,11 @@ import visceralFatIcon from "../SAMPLES/ICONS/Visceral_Fat_Icon-removebg-preview
 import wellnessLogo from "../SAMPLES/LOGO-removebg-preview.png";
 
 const STORAGE_KEY = "wellness-form-state-v1";
+const OFFLINE_QUEUE_KEY = "wellness-offline-queue-v1";
+const UNDO_DELETE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_HISTORY = 100;
 const APPOINTMENT_COUNT = 26;
+const CURRENT_COACH_ID = "coach-test-1";
 
 const createEmptyAppointments = () =>
   Array.from({ length: APPOINTMENT_COUNT }, () => ({
@@ -41,13 +57,17 @@ const defaultEvaluation = {
 const defaultPage2Data = {
   date: "",
   name: "",
-  coach: ""
+  coach: "",
+  age: ""
 };
 
 const defaultFormState = {
   appointments: createEmptyAppointments(),
   evaluation: defaultEvaluation,
-  page2Data: defaultPage2Data
+  page2Data: defaultPage2Data,
+  clientId: "",
+  phone: "",
+  email: ""
 };
 
 const normalizeAppointments = (appointments) => {
@@ -64,7 +84,10 @@ const loadStoredState = () => {
     return {
       appointments: normalizeAppointments(parsed.appointments),
       evaluation: { ...defaultEvaluation, ...(parsed.evaluation || {}) },
-      page2Data: { ...defaultPage2Data, ...(parsed.page2Data || {}) }
+      page2Data: { ...defaultPage2Data, ...(parsed.page2Data || {}) },
+      phone: parsed.phone || "",
+      email: parsed.email || "",
+      clientId: parsed.clientId || ""
     };
   } catch (error) {
     return defaultFormState;
@@ -133,13 +156,88 @@ const WellnessForm = () => {
       future: []
     })
   );
+  const [saveNotice, setSaveNotice] = useState("");
+  const [activeTab, setActiveTab] = useState("form");
+  const [clients, setClients] = useState([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [expandedClientId, setExpandedClientId] = useState(null);
+  const [clientsSort, setClientsSort] = useState("updatedAtDesc");
+  const [clientsSearch, setClientsSearch] = useState("");
+  const [lastDeleted, setLastDeleted] = useState(null);
+  const [clientsView, setClientsView] = useState("all");
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
+  const [currentRole, setCurrentRole] = useState("coach");
 
-  const { appointments, evaluation, page2Data } = state.present;
+  const { appointments, evaluation, page2Data, phone, email } = state.present;
   const canUndo = state.past.length > 0;
   const canRedo = state.future.length > 0;
 
   useEffect(() => {
 // registerSW({ immediate: true });
+  }, []);
+
+  useEffect(() => {
+    const syncOfflineQueue = async () => {
+      const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+      if (!rawQueue) return;
+      let queue = [];
+      try {
+        queue = JSON.parse(rawQueue) || [];
+      } catch (error) {
+        return;
+      }
+      if (!queue.length) return;
+
+      const remaining = [];
+      for (const item of queue) {
+        try {
+          if (item.action === "delete") {
+            const docRef = doc(db, "clients", item.clientId);
+            await updateDoc(docRef, {
+              deletedAt: serverTimestamp(),
+              syncStatus: "deleted"
+            });
+          } else if (item.action === "undelete") {
+            const docRef = doc(db, "clients", item.clientId);
+            await updateDoc(docRef, {
+              deletedAt: deleteField(),
+              syncStatus: deleteField()
+            });
+          } else if (item.clientId) {
+            const docRef = doc(db, "clients", item.clientId);
+            await updateDoc(docRef, {
+              ...item.data,
+              updatedAt: serverTimestamp()
+            });
+          } else {
+            await addDoc(collection(db, "clients"), {
+              ...item.data,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+          }
+        } catch (error) {
+          remaining.push(item, ...queue.slice(queue.indexOf(item) + 1));
+          localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+          return;
+        }
+      }
+
+      localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    };
+
+    const handleOnline = () => {
+      syncOfflineQueue();
+    };
+
+    window.addEventListener("online", handleOnline);
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      syncOfflineQueue();
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
   }, []);
 
   useEffect(() => {
@@ -177,6 +275,15 @@ const WellnessForm = () => {
     });
   };
 
+  const updateTopLevel = (field, value) => {
+    dispatch({
+      type: "UPDATE",
+      updater: (prev) => ({
+        ...prev,
+        [field]: value
+      })
+    });
+  };
   const toTitleCase = (value) =>
     value
       .toLowerCase()
@@ -244,51 +351,1447 @@ const WellnessForm = () => {
 
   const formatDateToDisplay = (date) => {
     const day = String(date.getDate()).padStart(2, "0");
-    const monthName = date.toLocaleString("en-US", { month: "long" }).toUpperCase();
+    const monthName = toTitleCase(date.toLocaleString("en-US", { month: "long" }));
     const year = date.getFullYear();
     return `${day}-${monthName}-${year}`;
   };
+
+  const formatClientDate = (value) => {
+    if (!value) return "";
+    const trimmed = String(value).trim();
+    if (!trimmed) return "";
+    const match = trimmed.match(/^(\d{2})-([A-Za-z]+)-(\d{4})$/);
+    if (!match) return trimmed;
+    const [, day, month, year] = match;
+    return `${day}-${toTitleCase(month)}-${year}`;
+  };
+
+  const parseClientDate = (value) => {
+    if (!value) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    const match = trimmed.match(/^(\d{2})-([A-Za-z]+)-(\d{4})$/);
+    if (!match) return null;
+    const [, day, monthName, year] = match;
+    const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth();
+    if (Number.isNaN(monthIndex)) return null;
+    return new Date(Number(year), monthIndex, Number(day));
+  };
+
+  const getWeekRange = (date) => {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const day = start.getDay();
+    const diff = (day + 6) % 7; // Monday as start of week
+    start.setDate(start.getDate() - diff);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  };
+
+  const escapeHtml = (value) =>
+    String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const getClientsReportTitle = () => {
+    switch (clientsView) {
+      case "thisWeek":
+        return "Clients This Week";
+      case "thisMonth":
+        return "Clients This Month";
+      case "byCoach":
+        return "Clients By Coach";
+      case "all":
+      default:
+        return "All Clients";
+    }
+  };
+
+  const downloadClientsPdf = () => {
+    const title = getClientsReportTitle();
+    const generatedAt = new Date().toLocaleString("en-US");
+    const columns = ["Name", "Phone", "Email", "Coach", "Date"];
+    const makeRow = (client) => [
+      client.clientName || "",
+      client.phone || "",
+      client.email || "",
+      client.coach || "",
+      formatClientDate(client.date) || ""
+    ];
+
+    const renderTable = (rows) => `
+      <table>
+        <thead>
+          <tr>${columns.map((col) => `<th>${escapeHtml(col)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) =>
+                `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+
+    let bodyHtml = "";
+    if (clientsView === "byCoach") {
+      const grouped = sortedClients.reduce((acc, client) => {
+        const coachName = client.coach || "Unassigned";
+        if (!acc[coachName]) acc[coachName] = [];
+        acc[coachName].push(client);
+        return acc;
+      }, {});
+      bodyHtml = Object.entries(grouped)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([coachName, coachClients]) => {
+          const rows = coachClients.map(makeRow);
+          return `
+            <h2>${escapeHtml(coachName)}</h2>
+            ${renderTable(rows)}
+          `;
+        })
+        .join("");
+    } else {
+      const rows = sortedClients.map(makeRow);
+      bodyHtml = renderTable(rows);
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(`
+      <html>
+        <head>
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+            h1 { font-size: 20px; margin: 0 0 6px; }
+            h2 { font-size: 14px; margin: 18px 0 6px; }
+            .meta { font-size: 12px; margin-bottom: 16px; color: #555; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+            th, td { border: 1px solid #222; padding: 6px 8px; font-size: 12px; text-align: left; }
+            th { background: #f3f3f3; }
+            @media print { @page { margin: 12mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(title)}</h1>
+          <div class="meta">Generated: ${escapeHtml(generatedAt)}</div>
+          ${bodyHtml || "<div>No clients found.</div>"}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    iframe.onload = () => {
+      const win = iframe.contentWindow;
+      if (win) {
+        win.focus();
+        win.print();
+      }
+      setTimeout(() => iframe.remove(), 1000);
+    };
+  };
+
+  const downloadClientFullPdf = (client) => {
+    const generatedAt = new Date().toLocaleString("en-US");
+    const toTitleCase = (value) =>
+      String(value)
+        .toLowerCase()
+        .split(" ")
+        .filter(Boolean)
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(" ");
+    const formatValue = (value) => {
+      if (value === null || value === undefined) return "";
+      const text = String(value);
+      if (text.includes("@")) return text;
+      if (/^\s*[\d+\-() ]+\s*$/.test(text)) return text.trim();
+      return toTitleCase(text);
+    };
+    const headerItems = [
+      ["Name", formatValue(client.clientName || "")],
+      ["Phone", client.phone || ""],
+      ["Email", client.email || ""],
+      ["Coach", formatValue(client.coach || "")],
+      ["Date", formatClientDate(client.date) || ""]
+    ];
+    const page2Entries = Object.entries(client.page2Data || {});
+    const appointments = Array.isArray(client.appointments) ? client.appointments : [];
+    const evaluation = client.evaluation || {};
+
+    const escapeHtml = (value) =>
+      String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const renderTable = (headers, rows) => `
+      <table>
+        <thead>
+          <tr>${headers.map((col) => `<th>${escapeHtml(col)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) =>
+                `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+
+    const appointmentHeaders = [
+      "Age",
+      "Height",
+      "Weight",
+      "Body Fat",
+      "Water",
+      "Muscle",
+      "Physique",
+      "BMR",
+      "Basal",
+      "Bone",
+      "Visceral"
+    ];
+    const appointmentRows = appointments.map((apt) => [
+      apt.age || "",
+      apt.height || "",
+      apt.weight || "",
+      apt.bodyFat || "",
+      apt.water || "",
+      apt.muscle || "",
+      apt.physique || "",
+      apt.bmr || "",
+      apt.basal || "",
+      apt.bone || "",
+      apt.visceral || ""
+    ]);
+
+    const evaluationRows = Object.entries(evaluation).map(([key, value]) => [
+      toTitleCase(key),
+      formatValue(value ?? "")
+    ]);
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(`
+      <html>
+        <head>
+          <title>${escapeHtml(client.clientName || "Client Report")}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+            h1 { font-size: 20px; margin: 0 0 6px; }
+            h2 { font-size: 14px; margin: 18px 0 6px; }
+            .meta { font-size: 12px; margin-bottom: 16px; color: #555; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+            th, td { border: 1px solid #222; padding: 6px 8px; font-size: 12px; text-align: left; }
+            th { background: #f3f3f3; }
+            .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 12px; }
+            .kv div { padding: 2px 0; }
+            @media print { @page { margin: 12mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(client.clientName || "Client Report")}</h1>
+          <div class="meta">Generated: ${escapeHtml(generatedAt)}</div>
+          <div class="kv">
+            ${headerItems
+              .map(([label, value]) => `<div><strong>${escapeHtml(label)}:</strong></div><div>${escapeHtml(value)}</div>`)
+              .join("")}
+          </div>
+          <h2>Page 2 Data</h2>
+          <div class="kv">
+            ${page2Entries
+              .map(([label, value]) => `<div><strong>${escapeHtml(toTitleCase(label))}:</strong></div><div>${escapeHtml(formatValue(value ?? ""))}</div>`)
+              .join("")}
+          </div>
+          <h2>Appointments</h2>
+          ${renderTable(appointmentHeaders, appointmentRows)}
+          <h2>Evaluation</h2>
+          ${evaluationRows.length ? renderTable(["Field", "Value"], evaluationRows) : "<div>No evaluation data.</div>"}
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    iframe.onload = () => {
+      const win = iframe.contentWindow;
+      if (win) {
+        win.focus();
+        win.print();
+      }
+      setTimeout(() => iframe.remove(), 1000);
+    };
+  };
+
+  const getOfflineDeletedIds = () => {
+    try {
+      const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+      if (!rawQueue) return new Set();
+      const queue = JSON.parse(rawQueue) || [];
+      const lastAction = new Map();
+      for (const item of queue) {
+        if (!item.clientId) continue;
+        if (item.action === "delete" || item.action === "undelete") {
+          lastAction.set(item.clientId, item.action);
+        }
+      }
+      return new Set(
+        Array.from(lastAction.entries())
+          .filter(([, action]) => action === "delete")
+          .map(([clientId]) => clientId)
+      );
+    } catch (error) {
+      return new Set();
+    }
+  };
+
+  const getDeletedClients = () => {
+    const isAdmin = currentRole === "admin";
+    const offlineDeletedIds = getOfflineDeletedIds();
+    return clients.filter((client) => {
+      if (!isAdmin && client.assignedCoachId !== CURRENT_COACH_ID) return false;
+      const isDeleted =
+        client.deletedAt ||
+        client.syncStatus === "deleted" ||
+        offlineDeletedIds.has(client.id);
+      return isDeleted;
+    });
+  };
+
+  const restoreClient = async (client) => {
+    const updateLocal = () => {
+      setClients((prev) =>
+        prev.map((item) =>
+          item.id === client.id
+            ? { ...item, deletedAt: undefined, syncStatus: undefined }
+            : item
+        )
+      );
+    };
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const queueItem = {
+        clientId: client.id,
+        action: "undelete",
+        timestamp: Date.now(),
+        syncStatus: "pending"
+      };
+      try {
+        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push(queueItem);
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch (error) {
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queueItem]));
+      }
+      updateLocal();
+      if (lastDeleted?.clientId === client.id) {
+        setLastDeleted(null);
+      }
+      showSaveNotice("Client restored (offline).");
+      return;
+    }
+
+    const docRef = doc(db, "clients", client.id);
+    await updateDoc(docRef, {
+      deletedAt: deleteField(),
+      syncStatus: deleteField()
+    });
+    updateLocal();
+    if (lastDeleted?.clientId === client.id) {
+      setLastDeleted(null);
+    }
+    showSaveNotice("Client restored.");
+  };
+
+  const restoreAllDeletedClients = async () => {
+    const deletedClients = getDeletedClients();
+    if (!deletedClients.length) return;
+
+    const updateLocal = () => {
+      setClients((prev) =>
+        prev.map((item) =>
+          deletedClients.some((client) => client.id === item.id)
+            ? { ...item, deletedAt: undefined, syncStatus: undefined }
+            : item
+        )
+      );
+    };
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      try {
+        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        deletedClients.forEach((client) => {
+          queue.push({
+            clientId: client.id,
+            action: "undelete",
+            timestamp: Date.now(),
+            syncStatus: "pending"
+          });
+        });
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch (error) {
+        const queue = deletedClients.map((client) => ({
+          clientId: client.id,
+          action: "undelete",
+          timestamp: Date.now(),
+          syncStatus: "pending"
+        }));
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      }
+      updateLocal();
+      setLastDeleted(null);
+      showSaveNotice("All clients restored (offline).");
+      return;
+    }
+
+    await Promise.all(
+      deletedClients.map((client) =>
+        updateDoc(doc(db, "clients", client.id), {
+          deletedAt: deleteField(),
+          syncStatus: deleteField()
+        })
+      )
+    );
+    updateLocal();
+    setLastDeleted(null);
+    showSaveNotice("All clients restored.");
+  };
+
+  const emptyRecycleBin = async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    const deletedClients = getDeletedClients();
+    if (!deletedClients.length) return;
+    await Promise.all(
+      deletedClients.map((client) => deleteDoc(doc(db, "clients", client.id)))
+    );
+    setClients((prev) =>
+      prev.filter((item) => !deletedClients.some((client) => client.id === item.id))
+    );
+    setLastDeleted(null);
+    showSaveNotice("Recycle Bin emptied.");
+  };
+
+  const sortedClients = (() => {
+    const isAdmin = currentRole === "admin";
+    const queryText = clientsSearch.trim().toLowerCase();
+    const offlineDeletedIds = getOfflineDeletedIds();
+    const visibleClients = clients.filter((client) => {
+      if (!isAdmin && client.assignedCoachId !== CURRENT_COACH_ID) return false;
+      const isDeleted =
+        client.deletedAt ||
+        client.syncStatus === "deleted" ||
+        offlineDeletedIds.has(client.id);
+      return clientsView === "recycleBin" ? isDeleted : !isDeleted;
+    });
+    const now = new Date();
+    const { start, end } = getWeekRange(now);
+    const viewFiltered = visibleClients.filter((client) => {
+      if (clientsView === "recycleBin") return true;
+      if (clientsView === "all" || clientsView === "byCoach") return true;
+      const parsed = parseClientDate(client.date);
+      if (!parsed) return false;
+      if (clientsView === "thisWeek") {
+        return parsed >= start && parsed <= end;
+      }
+      if (clientsView === "thisMonth") {
+        return (
+          parsed.getFullYear() === now.getFullYear() &&
+          parsed.getMonth() === now.getMonth()
+        );
+      }
+      return true;
+    });
+    const list = queryText
+      ? viewFiltered.filter((client) => {
+        const haystack = [
+          client.phone,
+          client.email,
+          client.clientName,
+          client.coach,
+          client.date,
+          ...Object.values(client.evaluation || {})
+        ]
+          .filter((value) => value !== null && value !== undefined)
+          .map((value) => String(value).toLowerCase());
+        return haystack.some((value) => value.includes(queryText));
+      })
+      : [...viewFiltered];
+
+    switch (clientsSort) {
+      case "nameAsc":
+        return list.sort((a, b) => (a.clientName || "").localeCompare(b.clientName || ""));
+      case "nameDesc":
+        return list.sort((a, b) => (b.clientName || "").localeCompare(a.clientName || ""));
+      case "dateAsc":
+        return list.sort((a, b) => {
+          const aDate = parseClientDate(a.date);
+          const bDate = parseClientDate(b.date);
+          if (!aDate && !bDate) return 0;
+          if (!aDate) return 1;
+          if (!bDate) return -1;
+          return aDate - bDate;
+        });
+      case "dateDesc":
+        return list.sort((a, b) => {
+          const aDate = parseClientDate(a.date);
+          const bDate = parseClientDate(b.date);
+          if (!aDate && !bDate) return 0;
+          if (!aDate) return 1;
+          if (!bDate) return -1;
+          return bDate - aDate;
+        });
+      case "coachAsc":
+        return list.sort((a, b) => (a.coach || "").localeCompare(b.coach || ""));
+      case "updatedAtDesc":
+      default:
+        return list.sort((a, b) => {
+          const aTime = a.updatedAt?.toMillis ? a.updatedAt.toMillis() : 0;
+          const bTime = b.updatedAt?.toMillis ? b.updatedAt.toMillis() : 0;
+          return bTime - aTime;
+        });
+    }
+  })();
 
   const setTodayDate = () => {
     updatePage2Data("date", formatDateToDisplay(new Date()));
   };
 
+  const showSaveNotice = (message) => {
+    setSaveNotice(message);
+    setTimeout(() => setSaveNotice(""), 3000);
+  };
+
+  const loadClients = async () => {
+    setClientsLoading(true);
+    const q = query(collection(db, "clients"), orderBy("updatedAt", "desc"));
+    const snapshot = await getDocs(q);
+    const items = snapshot.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...docSnap.data()
+    }));
+    setClients(items);
+    setClientsLoading(false);
+  };
+
+  const toggleClient = (clientId) => {
+    setExpandedClientId((prev) => (prev === clientId ? null : clientId));
+  };
+
+  const getLatestAppointment = (appointments = []) => {
+    if (!Array.isArray(appointments)) return null;
+    for (let i = appointments.length - 1; i >= 0; i -= 1) {
+      const item = appointments[i];
+      if (!item) continue;
+      const hasValue = Object.values(item).some(
+        (value) => value !== null && value !== undefined && String(value).trim() !== ""
+      );
+      if (hasValue) return item;
+    }
+    return null;
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    if (tab === "clients") {
+      loadClients();
+    }
+  };
+
+  const openClientInForm = (client) => {
+    dispatch({
+      type: "UPDATE",
+      updater: (prev) => ({
+        ...prev,
+        clientId: client.id || "",
+        page2Data: {
+          ...defaultPage2Data,
+          ...(client.page2Data || {}),
+          name: client.clientName ?? client.page2Data?.name ?? "",
+          coach: client.coach ?? client.page2Data?.coach ?? "",
+          date: client.date ?? client.page2Data?.date ?? "",
+          age: client.page2Data?.age ?? client.age ?? ""
+        },
+        phone: client.phone ?? "",
+        email: client.email ?? "",
+        appointments: normalizeAppointments(client.appointments),
+        evaluation: { ...defaultEvaluation, ...(client.evaluation || {}) }
+      })
+    });
+    setActiveTab("form");
+  };
+
+  const undoDeleteClient = async () => {
+    if (!lastDeleted) return;
+    if (Date.now() - lastDeleted.deletedAtMs > UNDO_DELETE_WINDOW_MS) return;
+
+    const updateLocal = () => {
+      setClients((prev) =>
+        prev.map((item) =>
+          item.id === lastDeleted.clientId
+            ? { ...item, deletedAt: undefined, syncStatus: undefined }
+            : item
+        )
+      );
+    };
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const queueItem = {
+        clientId: lastDeleted.clientId,
+        action: "undelete",
+        timestamp: Date.now(),
+        syncStatus: "pending"
+      };
+      try {
+        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push(queueItem);
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch (error) {
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queueItem]));
+      }
+      updateLocal();
+      setLastDeleted(null);
+      showSaveNotice("Delete undone (offline).");
+      return;
+    }
+
+    const docRef = doc(db, "clients", lastDeleted.clientId);
+    await updateDoc(docRef, {
+      deletedAt: deleteField(),
+      syncStatus: deleteField()
+    });
+    updateLocal();
+    setLastDeleted(null);
+    showSaveNotice("Delete undone.");
+  };
+
+  const deleteClient = async (client) => {
+    const deletedAtMs = Date.now();
+    const updateLocal = () => {
+      setClients((prev) =>
+        prev.map((item) =>
+          item.id === client.id
+            ? { ...item, deletedAt: deletedAtMs, syncStatus: "deleted" }
+            : item
+        )
+      );
+    };
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const queueItem = {
+        clientId: client.id,
+        action: "delete",
+        timestamp: deletedAtMs,
+        syncStatus: "pending"
+      };
+      try {
+        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push(queueItem);
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch (error) {
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queueItem]));
+      }
+      updateLocal();
+      setLastDeleted({
+        clientId: client.id,
+        clientName: client.clientName || "Unnamed client",
+        deletedAtMs
+      });
+      showSaveNotice("Client deleted (offline).");
+      return;
+    }
+
+    const docRef = doc(db, "clients", client.id);
+    await updateDoc(docRef, {
+      deletedAt: serverTimestamp(),
+      syncStatus: "deleted"
+    });
+    updateLocal();
+    setLastDeleted({
+      clientId: client.id,
+      clientName: client.clientName || "Unnamed client",
+      deletedAtMs
+    });
+    showSaveNotice("Client deleted.");
+  };
+
+  const handleSave = async ({ skipDuplicateCheck = false } = {}) => {
+    const { page2Data, appointments, evaluation } = state.present;
+    const payload = {
+      clientName: page2Data?.name ?? "",
+      phone: state.present.phone ?? "",
+      email: state.present.email ?? "",
+      coach: page2Data?.coach ?? "",
+      date: page2Data?.date ?? "",
+      age: page2Data?.age ?? "",
+      page2Data,
+      appointments,
+      evaluation
+    };
+
+    if (!skipDuplicateCheck && !state.present.clientId) {
+      const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
+      const offlineDeletedIds = getOfflineDeletedIds();
+      const activeClients = clients.filter(
+        (client) =>
+          !client.deletedAt &&
+          client.syncStatus !== "deleted" &&
+          !offlineDeletedIds.has(client.id)
+      );
+      const normalizedPhone = normalizeValue(payload.phone);
+      const normalizedEmail = normalizeValue(payload.email);
+      const normalizedName = normalizeValue(payload.clientName);
+      let strongMatch = null;
+      let strongMatchType = "";
+
+      if (normalizedPhone) {
+        strongMatch = activeClients.find(
+          (client) => normalizeValue(client.phone) === normalizedPhone
+        );
+        if (strongMatch) strongMatchType = "phone";
+      }
+      if (!strongMatch && normalizedEmail) {
+        strongMatch = activeClients.find(
+          (client) => normalizeValue(client.email) === normalizedEmail
+        );
+        if (strongMatch) strongMatchType = "email";
+      }
+
+      if (strongMatch) {
+        setDuplicateWarning({
+          type: "strong",
+          match: strongMatch,
+          matchType: strongMatchType
+        });
+        return;
+      }
+
+      if (!normalizedPhone && !normalizedEmail && normalizedName) {
+        const nameMatch = activeClients.find(
+          (client) => normalizeValue(client.clientName) === normalizedName
+        );
+        if (nameMatch) {
+          setDuplicateWarning({
+            type: "name",
+            match: nameMatch
+          });
+          return;
+        }
+      }
+    }
+
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      const queueItem = {
+        clientId: state.present.clientId || "",
+        action: state.present.clientId ? "update" : "create",
+        data: state.present.clientId
+          ? payload
+          : { ...payload, assignedCoachId: CURRENT_COACH_ID },
+        timestamp: Date.now(),
+        syncStatus: "pending"
+      };
+      try {
+        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push(queueItem);
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      } catch (error) {
+        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queueItem]));
+      }
+      showSaveNotice("Saved offline. Will sync when online.");
+      return;
+    }
+
+    if (state.present.clientId) {
+      const docRef = doc(db, "clients", state.present.clientId);
+      await updateDoc(docRef, {
+        ...payload,
+        updatedAt: serverTimestamp()
+      });
+      showSaveNotice("Client saved successfully");
+      return;
+    }
+
+    const docRef = await addDoc(collection(db, "clients"), {
+      ...payload,
+      assignedCoachId: CURRENT_COACH_ID,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    dispatch({
+      type: "UPDATE",
+      updater: (prev) => ({ ...prev, clientId: docRef.id })
+    });
+    showSaveNotice("Client saved successfully");
+  };
+
   return (
     <div className="bg-gray-100 min-h-screen">
+      {saveNotice ? (
+        <div className="fixed top-4 right-4 z-50 rounded border border-green-200 bg-green-50 px-4 py-2 text-sm font-semibold text-green-700 shadow-lg">
+          {saveNotice}
+        </div>
+      ) : null}
       <div className="flex flex-wrap justify-center gap-3 p-4 print:hidden">
         <button
-          onClick={() => dispatch({ type: "UNDO" })}
-          disabled={!canUndo}
+          onClick={() => handleTabChange("form")}
           className={`px-4 py-2 rounded border text-sm font-semibold ${
-            canUndo ? "bg-white hover:bg-gray-100" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            activeTab === "form" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
           }`}
         >
-          Undo
+          Form
         </button>
         <button
-          onClick={() => dispatch({ type: "REDO" })}
-          disabled={!canRedo}
+          onClick={() => handleTabChange("clients")}
           className={`px-4 py-2 rounded border text-sm font-semibold ${
-            canRedo ? "bg-white hover:bg-gray-100" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            activeTab === "clients" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
           }`}
         >
-          Redo
-        </button>
-        <button
-          onClick={() => dispatch({ type: "CLEAR" })}
-          className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
-        >
-          Clear All
-        </button>
-        <button
-          onClick={exportToPDF}
-          className="bg-[#2f4f1f] text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-[#243c18]"
-        >
-          <Download size={20} />
-          Export as PDF
+          Clients
         </button>
       </div>
+      {activeTab === "form" ? (
+        <div className="flex flex-wrap justify-center gap-3 px-4 pb-4 print:hidden">
+          <button
+            onClick={() => dispatch({ type: "CLEAR" })}
+            className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+          >
+            Add New Client
+          </button>
+          <button
+            onClick={() => dispatch({ type: "UNDO" })}
+            disabled={!canUndo}
+            className={`px-4 py-2 rounded border text-sm font-semibold ${
+              canUndo ? "bg-white hover:bg-gray-100" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            Undo
+          </button>
+          <button
+            onClick={() => dispatch({ type: "REDO" })}
+            disabled={!canRedo}
+            className={`px-4 py-2 rounded border text-sm font-semibold ${
+              canRedo ? "bg-white hover:bg-gray-100" : "bg-gray-200 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            Redo
+          </button>
+          <button
+            onClick={exportToPDF}
+            className="bg-[#2f4f1f] text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-[#243c18]"
+          >
+            <Download size={20} />
+            Export as PDF
+          </button>
+          <button
+            onClick={handleSave}
+            className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
+          >
+            Save
+          </button>
+        </div>
+      ) : null}
 
+      <div className="fixed top-4 left-4 z-40 flex items-center gap-2 rounded border bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow print:hidden">
+        <label htmlFor="role-switch">Role</label>
+        <select
+          id="role-switch"
+          className="border rounded px-2 py-1 text-xs bg-white"
+          value={currentRole}
+          onChange={(e) => setCurrentRole(e.target.value)}
+        >
+          <option value="coach">Coach</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      {activeTab === "clients" ? (
+        <div className="max-w-5xl mx-auto bg-white shadow-lg p-6 print:hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-[#2f4f1f]">Clients</h2>
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-semibold text-gray-700" htmlFor="clients-sort">
+                Sort
+              </label>
+              <select
+                id="clients-sort"
+                className="border rounded px-2 py-1 text-sm bg-white"
+                value={clientsSort}
+                onChange={(e) => setClientsSort(e.target.value)}
+              >
+                <option value="updatedAtDesc">Date (Newest first)</option>
+                <option value="dateDesc">Date (Newest first - client date)</option>
+                <option value="dateAsc">Date (Oldest first)</option>
+                <option value="nameAsc">Name A-Z</option>
+                <option value="nameDesc">Name Z-A</option>
+                <option value="coachAsc">Coach A-Z</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setClientsView("all")}
+                className={`px-4 py-2 rounded border text-sm font-semibold ${
+                  clientsView === "all" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                }`}
+              >
+                All Clients
+              </button>
+              <button
+                type="button"
+                onClick={downloadClientsPdf}
+                className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Download PDF
+              </button>
+              <button
+                onClick={loadClients}
+                className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Sync from Cloud
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setClientsView((prev) => (prev === "recycleBin" ? "all" : "recycleBin"))
+                }
+                className={`px-4 py-2 rounded border text-sm font-semibold ${
+                  clientsView === "recycleBin" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                }`}
+              >
+                Recycle Bin
+              </button>
+            </div>
+          </div>
+          {clientsView !== "recycleBin" ? (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {[
+                { value: "thisWeek", label: "This Week" },
+                { value: "thisMonth", label: "This Month" },
+                { value: "byCoach", label: "By Coach" }
+              ].map((view) => (
+                <button
+                  key={view.value}
+                  type="button"
+                  onClick={() => setClientsView(view.value)}
+                  className={`px-3 py-1 rounded border text-xs font-semibold ${
+                    clientsView === view.value ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                  }`}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {clientsView === "recycleBin" ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={restoreAllDeletedClients}
+                className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+              >
+                Restore All
+              </button>
+              <button
+                type="button"
+                onClick={emptyRecycleBin}
+                disabled={typeof navigator !== "undefined" && !navigator.onLine}
+                className={`px-3 py-1 rounded border text-xs font-semibold ${
+                  typeof navigator !== "undefined" && !navigator.onLine
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-white hover:bg-gray-100"
+                }`}
+              >
+                Empty Recycle Bin
+              </button>
+            </div>
+          ) : null}
+          <div className="mb-4">
+            <input
+              type="text"
+              className="w-full rounded border px-3 py-2 text-sm"
+              placeholder="Search Clients by Name, Coach, Date, or Evaluation Values"
+              value={clientsSearch}
+              onChange={(e) => setClientsSearch(e.target.value)}
+            />
+          </div>
+          {lastDeleted && Date.now() - lastDeleted.deletedAtMs <= UNDO_DELETE_WINDOW_MS ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div>
+                Client deleted: {lastDeleted.clientName}
+              </div>
+              <button
+                type="button"
+                onClick={undoDeleteClient}
+                className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+              >
+                Undo
+              </button>
+            </div>
+          ) : null}
+          {clientsLoading ? (
+            <div className="text-sm text-gray-600">Loading...</div>
+          ) : sortedClients.length === 0 ? (
+            <div className="text-sm text-gray-600">No clients found.</div>
+          ) : (
+            <div className="space-y-3">
+              {clientsView === "byCoach" ? (
+                Object.entries(
+                  sortedClients.reduce((acc, client) => {
+                    const coachName = client.coach || "Unassigned";
+                    if (!acc[coachName]) acc[coachName] = [];
+                    acc[coachName].push(client);
+                    return acc;
+                  }, {})
+                )
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([coachName, coachClients]) => (
+                    <div key={coachName}>
+                      <div className="text-sm font-semibold text-gray-700 mb-2">
+                        {coachName}
+                      </div>
+                      <div className="space-y-3">
+                        {coachClients.map((client) => (
+                          <div
+                            key={client.id}
+                            className="border rounded p-3 cursor-pointer hover:bg-gray-50"
+                            onClick={() => toggleClient(client.id)}
+                          >
+                            <div className="font-semibold text-[#2f4f1f]">{client.clientName || "Unnamed client"}</div>
+                            <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
+                                <span>Age: {client.age || client.page2Data?.age || "-"}</span>
+                                <span>|</span>
+                                <span>Coach: {client.coach || "-"}</span>
+                                <span>|</span>
+                                <span>Date: {formatClientDate(client.date) || "-"}</span>
+                                {client.phone ? (
+                                  <>
+                                    <span>|</span>
+                                    <a
+                                      href={`tel:${client.phone}`}
+                                      className="text-[#2f4f1f] hover:underline"
+                                    >
+                                      Phone: {client.phone}
+                                    </a>
+                                  </>
+                                ) : null}
+                                {client.email ? (
+                                  <>
+                                    <span>|</span>
+                                    <a
+                                      href={`mailto:${client.email}`}
+                                      className="text-[#2f4f1f] hover:underline break-all"
+                                    >
+                                      Email: {client.email}
+                                    </a>
+                                  </>
+                                ) : null}
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                {(client.phone || client.email) ? (
+                                  <div className="flex items-center gap-2">
+                                    {client.phone ? (
+                                      <>
+                                        <a
+                                          href={`tel:${client.phone}`}
+                                          className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                          aria-label="Call"
+                                          title="Call"
+                                        >
+                                          <Phone size={16} />
+                                        </a>
+                                        <a
+                                          href={`https://wa.me/${client.phone}`}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                          aria-label="WhatsApp"
+                                          title="WhatsApp"
+                                        >
+                                          <svg
+                                            viewBox="0 0 32 32"
+                                            width="16"
+                                            height="16"
+                                            fill="currentColor"
+                                            aria-hidden="true"
+                                          >
+                                            <path d="M16 3C9.4 3 4 8.3 4 14.9c0 2.6.9 5 2.4 7l-1.6 5.8 6-1.6c1.8 1 3.8 1.5 5.9 1.5 6.6 0 12-5.3 12-11.9S22.6 3 16 3zm0 2.1c5.5 0 9.9 4.4 9.9 9.8s-4.4 9.8-9.9 9.8c-2.1 0-4.1-.6-5.8-1.7l-.4-.2-3.5.9.9-3.4-.2-.3c-1.1-1.6-1.7-3.5-1.7-5.6C6.1 9.5 10.5 5.1 16 5.1zm-4.2 6.1c-.2 0-.4 0-.6.1-.2.1-.4.3-.6.6-.2.3-.8 1-.8 2.4s.9 2.7 1 2.9c.1.2 1.7 2.7 4.2 3.6 2.1.8 2.5.6 2.9.6.5 0 1.5-.6 1.7-1.2.2-.6.2-1 .2-1.1s-.1-.2-.2-.3-.5-.2-1-.4-1.2-.6-1.4-.6c-.2-.1-.4-.1-.6.1-.2.2-.7.8-.9 1-.2.2-.3.2-.6.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.6-1.4-1.9-.1-.2 0-.4.1-.5.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.6 0-.2-.5-1.3-.7-1.7-.2-.4-.4-.4-.6-.4z" />
+                                          </svg>
+                                        </a>
+                                      </>
+                                    ) : null}
+                                    {client.email ? (
+                                      <a
+                                        href={`mailto:${client.email}`}
+                                        className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                        aria-label="Email"
+                                        title="Email"
+                                      >
+                                        <Mail size={16} />
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap">
+                                  {clientsView === "recycleBin" ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        restoreClient(client);
+                                      }}
+                                      className="px-3 py-1 rounded border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                    >
+                                      Restore
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openClientInForm(client);
+                                        }}
+                                        className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                                      >
+                                        Open Form
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          downloadClientFullPdf(client);
+                                        }}
+                                        className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                                      >
+                                        ⬇ Download Full PDF
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          deleteClient(client);
+                                        }}
+                                        className="px-3 py-1 rounded border text-xs font-semibold bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                                      >
+                                        Delete Client
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {expandedClientId === client.id ? (
+                              <div className="mt-3 text-sm text-gray-800 border-t pt-3">
+                                {client.phone ? (
+                                  <div><span className="font-semibold">Phone:</span> {client.phone}</div>
+                                ) : null}
+                                {client.email ? (
+                                  <div><span className="font-semibold">Email:</span> {client.email}</div>
+                                ) : null}
+                                {(() => {
+                                  const latestAppointment = getLatestAppointment(client.appointments);
+                                  if (!latestAppointment) {
+                                    return <div className="pt-2 text-gray-600">No appointment data.</div>;
+                                  }
+                                  return (
+                                    <div className="pt-2">
+                                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        <div className="space-y-1">
+                                          <div><span className="font-semibold">Age:</span> {client.age || client.page2Data?.age || "-"}</div>
+                                          <div><span className="font-semibold">Next appointment:</span> {formatClientDate(client.date) || "-"}</div>
+                                          <div><span className="font-semibold">Height (Cm):</span> {latestAppointment.height || "-"}</div>
+                                          <div><span className="font-semibold">Weight (Kg):</span> {latestAppointment.weight || "-"}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <div><span className="font-semibold">Body Fat Range:</span> {latestAppointment.bodyFat || "-"}</div>
+                                          <div><span className="font-semibold">% Body Water Range:</span> {latestAppointment.water || "-"}</div>
+                                          <div><span className="font-semibold">Muscle Mass:</span> {latestAppointment.muscle || "-"}</div>
+                                          <div><span className="font-semibold">Physique Ratings:</span> {latestAppointment.physique || "-"}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <div><span className="font-semibold">BMR:</span> {latestAppointment.bmr || "-"}</div>
+                                          <div><span className="font-semibold">Basal Metabolic Age:</span> {latestAppointment.basal || "-"}</div>
+                                          <div><span className="font-semibold">Bone Mass:</span> {latestAppointment.bone || "-"}</div>
+                                          <div><span className="font-semibold">Visceral Fat:</span> {latestAppointment.visceral || "-"}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+              ) : (
+                sortedClients.map((client) => (
+                  <div
+                    key={client.id}
+                    className="border rounded p-3 cursor-pointer hover:bg-gray-50"
+                    onClick={() => toggleClient(client.id)}
+                  >
+                    <div className="font-semibold text-[#2f4f1f]">{client.clientName || "Unnamed client"}</div>
+                    <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
+                        <span>Age: {client.age || client.page2Data?.age || "-"}</span>
+                        <span>|</span>
+                        <span>Coach: {client.coach || "-"}</span>
+                        <span>|</span>
+                        <span>Date: {formatClientDate(client.date) || "-"}</span>
+                        {client.phone ? (
+                          <>
+                            <span>|</span>
+                            <a
+                              href={`tel:${client.phone}`}
+                              className="text-[#2f4f1f] hover:underline"
+                            >
+                              Phone: {client.phone}
+                            </a>
+                          </>
+                        ) : null}
+                        {client.email ? (
+                          <>
+                            <span>|</span>
+                            <a
+                              href={`mailto:${client.email}`}
+                              className="text-[#2f4f1f] hover:underline break-all"
+                            >
+                              Email: {client.email}
+                            </a>
+                          </>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        {(client.phone || client.email) ? (
+                          <div className="flex items-center gap-2">
+                            {client.phone ? (
+                              <>
+                                <a
+                                  href={`tel:${client.phone}`}
+                                  className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                  aria-label="Call"
+                                  title="Call"
+                                >
+                                  <Phone size={16} />
+                                </a>
+                                <a
+                                  href={`https://wa.me/${client.phone}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                  aria-label="WhatsApp"
+                                  title="WhatsApp"
+                                >
+                                  <svg
+                                    viewBox="0 0 32 32"
+                                    width="16"
+                                    height="16"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M16 3C9.4 3 4 8.3 4 14.9c0 2.6.9 5 2.4 7l-1.6 5.8 6-1.6c1.8 1 3.8 1.5 5.9 1.5 6.6 0 12-5.3 12-11.9S22.6 3 16 3zm0 2.1c5.5 0 9.9 4.4 9.9 9.8s-4.4 9.8-9.9 9.8c-2.1 0-4.1-.6-5.8-1.7l-.4-.2-3.5.9.9-3.4-.2-.3c-1.1-1.6-1.7-3.5-1.7-5.6C6.1 9.5 10.5 5.1 16 5.1zm-4.2 6.1c-.2 0-.4 0-.6.1-.2.1-.4.3-.6.6-.2.3-.8 1-.8 2.4s.9 2.7 1 2.9c.1.2 1.7 2.7 4.2 3.6 2.1.8 2.5.6 2.9.6.5 0 1.5-.6 1.7-1.2.2-.6.2-1 .2-1.1s-.1-.2-.2-.3-.5-.2-1-.4-1.2-.6-1.4-.6c-.2-.1-.4-.1-.6.1-.2.2-.7.8-.9 1-.2.2-.3.2-.6.1-.3-.1-1.1-.4-2.1-1.3-.8-.7-1.3-1.6-1.4-1.9-.1-.2 0-.4.1-.5.1-.1.3-.3.4-.5.1-.2.2-.3.3-.5.1-.2 0-.4 0-.6 0-.2-.5-1.3-.7-1.7-.2-.4-.4-.4-.6-.4z" />
+                                  </svg>
+                                </a>
+                              </>
+                            ) : null}
+                            {client.email ? (
+                              <a
+                                href={`mailto:${client.email}`}
+                                className="rounded border border-gray-200 bg-white p-1 text-[#2f4f1f] hover:bg-gray-100"
+                                aria-label="Email"
+                                title="Email"
+                              >
+                                <Mail size={16} />
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        <div className="flex items-center gap-2 flex-nowrap whitespace-nowrap">
+                          {clientsView === "recycleBin" ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                restoreClient(client);
+                              }}
+                              className="px-3 py-1 rounded border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openClientInForm(client);
+                                }}
+                                className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                              >
+                                Open Form
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadClientFullPdf(client);
+                                }}
+                                className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                              >
+                                ⬇ Download Full PDF
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteClient(client);
+                                }}
+                                className="px-3 py-1 rounded border text-xs font-semibold bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                              >
+                                Delete Client
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {expandedClientId === client.id ? (
+                      <div className="mt-3 text-sm text-gray-800 border-t pt-3">
+                        {(() => {
+                          const latestAppointment = getLatestAppointment(client.appointments);
+                          if (!latestAppointment) {
+                            return <div className="pt-2 text-gray-600">No appointment data.</div>;
+                          }
+                          return (
+                            <div className="pt-2">
+                              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div className="space-y-1">
+                                  <div><span className="font-semibold">Age:</span> {client.age || client.page2Data?.age || "-"}</div>
+                                  <div><span className="font-semibold">Next appointment:</span> {formatClientDate(client.date) || "-"}</div>
+                                  <div><span className="font-semibold">Height (Cm):</span> {latestAppointment.height || "-"}</div>
+                                  <div><span className="font-semibold">Weight (Kg):</span> {latestAppointment.weight || "-"}</div>
+                                </div>
+                                <div className="space-y-1">
+                                  <div><span className="font-semibold">Body Fat Range:</span> {latestAppointment.bodyFat || "-"}</div>
+                                  <div><span className="font-semibold">% Body Water Range:</span> {latestAppointment.water || "-"}</div>
+                                  <div><span className="font-semibold">Muscle Mass:</span> {latestAppointment.muscle || "-"}</div>
+                                  <div><span className="font-semibold">Physique Ratings:</span> {latestAppointment.physique || "-"}</div>
+                                </div>
+                                <div className="space-y-1">
+                                  <div><span className="font-semibold">BMR:</span> {latestAppointment.bmr || "-"}</div>
+                                  <div><span className="font-semibold">Basal Metabolic Age:</span> {latestAppointment.basal || "-"}</div>
+                                  <div><span className="font-semibold">Bone Mass:</span> {latestAppointment.bone || "-"}</div>
+                                  <div><span className="font-semibold">Visceral Fat:</span> {latestAppointment.visceral || "-"}</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {activeTab === "form" ? (
+        <>
+          <div className="max-w-7xl mx-auto px-4 pt-2">
+            <div className="text-sm font-semibold text-gray-700">
+              {state.present.clientId
+                ? `Editing client: ${page2Data.name || "Unnamed client"}`
+                : "New client"}
+            </div>
+            {duplicateWarning ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+                <div className={`w-full max-w-md rounded border px-4 py-4 text-sm shadow-lg ${
+                  duplicateWarning.type === "strong"
+                    ? "border-amber-300 bg-amber-50 text-amber-900"
+                    : "border-yellow-200 bg-yellow-50 text-yellow-900"
+                }`}>
+                  <div className="font-semibold">
+                    {duplicateWarning.type === "strong"
+                      ? "Possible duplicate client (phone/email match)"
+                      : "Possible duplicate by name"}
+                  </div>
+                  <div className="mt-1">
+                    {duplicateWarning.type === "strong"
+                      ? `This ${duplicateWarning.matchType} matches an existing client.`
+                      : "This may be a different person with the same name."}
+                  </div>
+                  <div className="mt-2 text-sm">
+                    <span className="font-semibold">Existing:</span>{" "}
+                    {duplicateWarning.match?.clientName || "Unnamed client"} | Coach:{" "}
+                    {duplicateWarning.match?.coach || "-"} | Date:{" "}
+                    {formatClientDate(duplicateWarning.match?.date) || "-"}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!duplicateWarning.match) return;
+                        setDuplicateWarning(null);
+                        openClientInForm(duplicateWarning.match);
+                      }}
+                      className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                    >
+                      Open existing client
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDuplicateWarning(null);
+                        handleSave({ skipDuplicateCheck: true });
+                      }}
+                      className="px-3 py-1 rounded border text-xs font-semibold bg-white hover:bg-gray-100"
+                    >
+                      Continue anyway
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
       <div className="max-w-7xl mx-auto bg-white shadow-lg page-break print-section">
         <div className="grid grid-cols-1 lg:grid-cols-2 print-split">
           <div className="p-4 text-xs leading-relaxed order-2 lg:order-2 print-col print-break tight-print">
@@ -470,6 +1973,24 @@ const WellnessForm = () => {
                       onChange={(e) => updatePage2Data("name", e.target.value)}
                     />
                   </div>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Phone Number</label>
+                    <input
+                      type="tel"
+                      className="w-full border-b-2 border-[#2f4f1f] p-2"
+                      value={phone}
+                      onChange={(e) => updateTopLevel("phone", e.target.value)}
+                    />
+                  </div>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Email</label>
+                    <input
+                      type="email"
+                      className="w-full border-b-2 border-[#2f4f1f] p-2"
+                      value={email}
+                      onChange={(e) => updateTopLevel("email", e.target.value)}
+                    />
+                  </div>
 
                   <div className="border-2 border-[#2f4f1f] p-4 text-center">
                     <label className="block font-bold mb-2">Your Personal Wellness Coach</label>
@@ -497,7 +2018,17 @@ const WellnessForm = () => {
             <div className="overflow-x-auto xl:overflow-x-visible print-fit-table phone-fit-table">
               <div className="min-w-[880px] xl:min-w-0 print-min-w-0 phone-fit-inner">
                 <div className="grid grid-cols-11 text-xs border-b border-black">
-                  <div className="border-r border-black p-1 text-center font-semibold">Age:</div>
+                  <div className="border-r border-black p-1 text-center font-semibold">
+                    <div>Age</div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="mt-1 w-full text-center bg-white"
+                      value={page2Data.age}
+                      onChange={(e) => updatePage2Data("age", e.target.value)}
+                    />
+                  </div>
                   <div className="border-r border-black p-1 text-center">Height<br/>cm</div>
                   <div className="border-r border-black p-1 text-center">Weight<br/>KG</div>
                   <div className="border-r border-black p-1 text-center">Body Fat<br/>Range</div>
@@ -543,7 +2074,10 @@ const WellnessForm = () => {
                 {appointments.map((apt, idx) => (
                   <div key={idx} className="grid grid-cols-11 text-xs border-b border-gray-300">
                     <input
-                      className="border-r border-black p-0.5 text-center w-full text-xs"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="border-r border-black p-0.5 text-center w-full text-xs bg-white relative z-10 pointer-events-auto"
                       value={apt.age}
                       onChange={(e) => updateAppointment(idx, "age", e.target.value)}
                     />
@@ -1029,6 +2563,12 @@ const WellnessForm = () => {
 
       <div className="flex flex-wrap justify-center gap-3 p-4 print:hidden">
         <button
+          onClick={() => dispatch({ type: "CLEAR" })}
+          className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+        >
+          Add New Client
+        </button>
+        <button
           onClick={() => dispatch({ type: "UNDO" })}
           disabled={!canUndo}
           className={`px-4 py-2 rounded border text-sm font-semibold ${
@@ -1047,19 +2587,21 @@ const WellnessForm = () => {
           Redo
         </button>
         <button
-          onClick={() => dispatch({ type: "CLEAR" })}
-          className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
-        >
-          Clear All
-        </button>
-        <button
           onClick={exportToPDF}
           className="bg-[#2f4f1f] text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-[#243c18]"
         >
           <Download size={20} />
           Export as PDF
         </button>
+        <button
+          onClick={handleSave}
+          className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
+        >
+          Save
+        </button>
       </div>
+        </>
+      ) : null}
     </div>
   );
 };
