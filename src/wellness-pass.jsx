@@ -7,13 +7,23 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
   serverTimestamp,
-  updateDoc
+  setDoc,
+  updateDoc,
+  where
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut
+} from "firebase/auth";
 // import { registerSW } from "virtual:pwa-register";
 import bodyFatRangeIcon from "../SAMPLES/ICONS/Body_Fat_Range_Icon-removebg-preview.png";
 import bodyWaterRangeIcon from "../SAMPLES/ICONS/Body_Water_Range_Icon-removebg-preview.png";
@@ -26,6 +36,9 @@ import wellnessLogo from "../SAMPLES/LOGO-removebg-preview.png";
 
 const STORAGE_KEY = "wellness-form-state-v1";
 const OFFLINE_QUEUE_KEY = "wellness-offline-queue-v1";
+const ADMIN_SESSION_KEY = "wellness-admin-uid";
+const COACH_SESSION_KEY = "wellness-coach-id";
+const COACH_NAME_KEY = "wellness-coach-name";
 const UNDO_DELETE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_HISTORY = 100;
 const APPOINTMENT_COUNT = 26;
@@ -166,14 +179,176 @@ const WellnessForm = () => {
   const [lastDeleted, setLastDeleted] = useState(null);
   const [clientsView, setClientsView] = useState("all");
   const [duplicateWarning, setDuplicateWarning] = useState(null);
-  const [currentRole, setCurrentRole] = useState("coach");
+  const [clientsByDate, setClientsByDate] = useState("");
+  const [session, setSession] = useState({
+    role: null,
+    coachId: "",
+    adminUid: "",
+    coachName: "",
+    isCoreAdmin: false,
+    adminStatus: ""
+  });
+  const [authView, setAuthView] = useState("initial");
+  const [authError, setAuthError] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [adminRegisterName, setAdminRegisterName] = useState("");
+  const [adminRegisterEmail, setAdminRegisterEmail] = useState("");
+  const [adminRegisterPassword, setAdminRegisterPassword] = useState("");
+  const [showAdminRegisterPassword, setShowAdminRegisterPassword] = useState(false);
+  const [coachName, setCoachName] = useState("");
+  const [coachPhone, setCoachPhone] = useState("");
+  const [coachLoginName, setCoachLoginName] = useState("");
+  const [coachLoginPhone, setCoachLoginPhone] = useState("");
+  const [authLoading, setAuthLoading] = useState(true);
+  const [pendingAdmins, setPendingAdmins] = useState([]);
+  const [pendingAdminsLoading, setPendingAdminsLoading] = useState(false);
+  const [pendingAdminsError, setPendingAdminsError] = useState("");
 
   const { appointments, evaluation, page2Data, phone, email } = state.present;
   const canUndo = state.past.length > 0;
   const canRedo = state.future.length > 0;
+  const currentRole = session.role || "coach";
+  const currentCoachId = session.role === "coach" ? session.coachId : "";
 
   useEffect(() => {
 // registerSW({ immediate: true });
+  }, []);
+
+  useEffect(() => {
+    const loadSession = async () => {
+      const adminUid = localStorage.getItem(ADMIN_SESSION_KEY) || "";
+      const coachId = localStorage.getItem(COACH_SESSION_KEY) || "";
+      if (adminUid) {
+        try {
+          const profileSnap = await getDoc(doc(db, "user", adminUid));
+          const profile = profileSnap.exists() ? profileSnap.data() : null;
+          if (profile && profile.role === "admin") {
+            if (profile.status && profile.status !== "approved" && !profile.isCoreAdmin) {
+              setAuthError("Awaiting admin approval");
+              setAuthView("admin");
+              localStorage.removeItem(ADMIN_SESSION_KEY);
+            } else {
+              setSession({
+                role: "admin",
+                adminUid,
+                coachId: "",
+                coachName: "",
+                isCoreAdmin: Boolean(profile.isCoreAdmin),
+                adminStatus: profile.status || ""
+              });
+              setAuthLoading(false);
+              return;
+            }
+            setAuthLoading(false);
+            return;
+          }
+        } catch (error) {
+          // ignore and fall through
+        }
+        localStorage.removeItem(ADMIN_SESSION_KEY);
+      }
+      if (coachId) {
+        try {
+          const coachSnap = await getDoc(doc(db, "user", coachId));
+          const coach = coachSnap.exists() ? coachSnap.data() : null;
+          if (coach && coach.role === "coach") {
+            setSession({
+              role: "coach",
+              coachId,
+              adminUid: "",
+              coachName: coach.name || localStorage.getItem(COACH_NAME_KEY) || "",
+              isCoreAdmin: false,
+              adminStatus: ""
+            });
+            setAuthLoading(false);
+            return;
+          }
+        } catch (error) {
+          // ignore and fall through
+        }
+        localStorage.removeItem(COACH_SESSION_KEY);
+        localStorage.removeItem(COACH_NAME_KEY);
+      }
+      setSession({
+        role: null,
+        coachId: "",
+        adminUid: "",
+        coachName: "",
+        isCoreAdmin: false,
+        adminStatus: ""
+      });
+      setAuthLoading(false);
+    };
+    loadSession();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setSession({
+          role: null,
+          coachId: "",
+          adminUid: "",
+          coachName: "",
+          isCoreAdmin: false,
+          adminStatus: ""
+        });
+        localStorage.removeItem(ADMIN_SESSION_KEY);
+        localStorage.removeItem(COACH_SESSION_KEY);
+        localStorage.removeItem(COACH_NAME_KEY);
+        setActiveTab("form");
+        return;
+      }
+
+      try {
+        const snap = await getDoc(doc(db, "user", user.uid));
+        if (!snap.exists()) {
+          setSession({
+            role: null,
+            coachId: "",
+            adminUid: "",
+            coachName: "",
+            isCoreAdmin: false,
+            adminStatus: ""
+          });
+          return;
+        }
+
+        const profile = snap.data();
+        if (profile.role === "admin" && profile.status && profile.status !== "approved" && !profile.isCoreAdmin) {
+          setAuthError("Awaiting admin approval");
+          setAuthView("admin");
+          localStorage.removeItem(ADMIN_SESSION_KEY);
+          await signOut(auth);
+          return;
+        }
+
+        setSession({
+          role: profile.role,
+          adminUid: profile.role === "admin" ? user.uid : "",
+          coachId: profile.role === "coach" ? user.uid : "",
+          coachName: profile.name || "",
+          isCoreAdmin: Boolean(profile.isCoreAdmin),
+          adminStatus: profile.status || ""
+        });
+
+        handleTabChange("clients");
+      } catch (err) {
+        console.error("Session restore failed", err);
+        setSession({
+          role: null,
+          coachId: "",
+          adminUid: "",
+          coachName: "",
+          isCoreAdmin: false,
+          adminStatus: ""
+        });
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -244,6 +419,12 @@ const WellnessForm = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.present));
   }, [state.present]);
 
+  useEffect(() => {
+    if (activeTab !== "clients") return;
+    if (!session.role) return;
+    loadClients();
+  }, [activeTab, session.role, currentCoachId]);
+
   const updateAppointment = (index, field, value) => {
     dispatch({
       type: "UPDATE",
@@ -291,6 +472,14 @@ const WellnessForm = () => {
       .filter(Boolean)
       .map((part) => part[0].toUpperCase() + part.slice(1))
       .join(" ");
+  const formatEvaluationValue = (value) => {
+    if (value === null || value === undefined) return "-";
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed ? toTitleCase(trimmed) : "-";
+    }
+    return String(value);
+  };
 
   const formatDateForFilename = (value) => {
     if (!value) return "";
@@ -317,12 +506,13 @@ const WellnessForm = () => {
 
   const buildPdfTitle = () => {
     const name = page2Data.name.trim();
-    const coach = page2Data.coach.trim();
+    const coachValue = page2Data.coach.trim();
+    const coach = coachValue.startsWith("Coach ") ? coachValue : coachValue ? `Coach ${coachValue}` : "";
     const date = formatDateForFilename(page2Data.date);
     const parts = [];
     if (name) parts.push(name);
     if (date) parts.push(date);
-    if (coach) parts.push(`Coach ${coach}`);
+    if (coach) parts.push(coach);
     const title = parts.length ? parts.join(" ") : "Personal Wellness Pass";
     return title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
   };
@@ -347,6 +537,63 @@ const WellnessForm = () => {
       // Fallback in case afterprint doesn't fire on some browsers.
       setTimeout(handleAfterPrint, 2000);
     }, 0);
+  };
+
+  const buildPdfContainer = () => {
+    const sections = document.querySelectorAll(".print-section");
+    if (!sections.length) return null;
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.left = "-10000px";
+    container.style.top = "0";
+    container.style.background = "#fff";
+    sections.forEach((section) => {
+      const clone = section.cloneNode(true);
+      container.appendChild(clone);
+    });
+    document.body.appendChild(container);
+    return container;
+  };
+
+  const handleSharePdf = async () => {
+    const filename = `${buildPdfTitle() || "Personal Wellness Pass"}.pdf`;
+    if (!navigator?.share) {
+      exportToPDF();
+      return;
+    }
+    const container = buildPdfContainer();
+    if (!container) {
+      exportToPDF();
+      return;
+    }
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      const worker = html2pdf()
+        .set({
+          margin: 0.3,
+          filename,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+        })
+        .from(container)
+        .toPdf();
+      const pdf = await worker.get("pdf");
+      const blob = pdf.output("blob");
+      const file = new File([blob], filename, { type: "application/pdf" });
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+        exportToPDF();
+        return;
+      }
+      await navigator.share({
+        title: buildPdfTitle() || "Personal Wellness Pass",
+        files: [file]
+      });
+    } catch (error) {
+      exportToPDF();
+    } finally {
+      container.remove();
+    }
   };
 
   const formatDateToDisplay = (date) => {
@@ -682,7 +929,7 @@ const WellnessForm = () => {
     const isAdmin = currentRole === "admin";
     const offlineDeletedIds = getOfflineDeletedIds();
     return clients.filter((client) => {
-      if (!isAdmin && client.assignedCoachId !== CURRENT_COACH_ID) return false;
+      if (!isAdmin && client.assignedCoachId !== currentCoachId) return false;
       const isDeleted =
         client.deletedAt ||
         client.syncStatus === "deleted" ||
@@ -691,7 +938,24 @@ const WellnessForm = () => {
     });
   };
 
+  const getVisibleClientsForReports = () => {
+    const isAdmin = currentRole === "admin";
+    const offlineDeletedIds = getOfflineDeletedIds();
+    return clients.filter((client) => {
+      if (!isAdmin && client.assignedCoachId !== currentCoachId) return false;
+      const isDeleted =
+        client.deletedAt ||
+        client.syncStatus === "deleted" ||
+        offlineDeletedIds.has(client.id);
+      return !isDeleted;
+    });
+  };
+
   const restoreClient = async (client) => {
+    if (currentRole !== "admin" && client.assignedCoachId !== currentCoachId) {
+      showSaveNotice("Action not allowed.");
+      return;
+    }
     const updateLocal = () => {
       setClients((prev) =>
         prev.map((item) =>
@@ -811,7 +1075,7 @@ const WellnessForm = () => {
     const queryText = clientsSearch.trim().toLowerCase();
     const offlineDeletedIds = getOfflineDeletedIds();
     const visibleClients = clients.filter((client) => {
-      if (!isAdmin && client.assignedCoachId !== CURRENT_COACH_ID) return false;
+      if (!isAdmin && client.assignedCoachId !== currentCoachId) return false;
       const isDeleted =
         client.deletedAt ||
         client.syncStatus === "deleted" ||
@@ -819,12 +1083,20 @@ const WellnessForm = () => {
       return clientsView === "recycleBin" ? isDeleted : !isDeleted;
     });
     const now = new Date();
+    const selectedDate = clientsByDate ? new Date(clientsByDate) : null;
+    const isSameDay = (left, right) =>
+      left.getFullYear() === right.getFullYear() &&
+      left.getMonth() === right.getMonth() &&
+      left.getDate() === right.getDate();
     const { start, end } = getWeekRange(now);
     const viewFiltered = visibleClients.filter((client) => {
       if (clientsView === "recycleBin") return true;
       if (clientsView === "all" || clientsView === "byCoach") return true;
       const parsed = parseClientDate(client.date);
       if (!parsed) return false;
+      if (clientsView === "today") {
+        return isSameDay(parsed, now);
+      }
       if (clientsView === "thisWeek") {
         return parsed >= start && parsed <= end;
       }
@@ -833,6 +1105,10 @@ const WellnessForm = () => {
           parsed.getFullYear() === now.getFullYear() &&
           parsed.getMonth() === now.getMonth()
         );
+      }
+      if (clientsView === "byDate") {
+        if (!selectedDate || Number.isNaN(selectedDate.getTime())) return false;
+        return isSameDay(parsed, selectedDate);
       }
       return true;
     });
@@ -898,7 +1174,12 @@ const WellnessForm = () => {
 
   const loadClients = async () => {
     setClientsLoading(true);
-    const q = query(collection(db, "clients"), orderBy("updatedAt", "desc"));
+    const q = currentRole === "admin"
+      ? query(collection(db, "clients"), orderBy("updatedAt", "desc"))
+      : query(
+          collection(db, "clients"),
+          where("assignedCoachId", "==", currentCoachId)
+        );
     const snapshot = await getDocs(q);
     const items = snapshot.docs.map((docSnap) => ({
       id: docSnap.id,
@@ -910,6 +1191,55 @@ const WellnessForm = () => {
 
   const toggleClient = (clientId) => {
     setExpandedClientId((prev) => (prev === clientId ? null : clientId));
+  };
+
+  const loadPendingAdmins = async () => {
+    setPendingAdminsLoading(true);
+    setPendingAdminsError("");
+    try {
+      const pendingQuery = query(
+        collection(db, "user"),
+        where("role", "==", "admin"),
+        where("status", "==", "pending")
+      );
+      const snap = await getDocs(pendingQuery);
+      const items = snap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }));
+      setPendingAdmins(items);
+    } catch (error) {
+      console.error("PENDING ADMINS ERROR:", error?.code, error?.message);
+      const message =
+        error?.code === "permission-denied"
+          ? "Permission denied loading pending admins."
+          : error?.message?.includes("blocked")
+            ? "Request blocked by client. Disable ad blocker for firestore.googleapis.com."
+            : "Failed to load pending admins.";
+      setPendingAdminsError(message);
+    } finally {
+      setPendingAdminsLoading(false);
+    }
+  };
+
+  const handleApproveAdmin = async (adminId) => {
+    try {
+      await updateDoc(doc(db, "user", adminId), { status: "approved" });
+      setPendingAdmins((prev) => prev.filter((item) => item.id !== adminId));
+    } catch (error) {
+      console.error("APPROVE ADMIN ERROR:", error?.code, error?.message);
+      setPendingAdminsError("Failed to approve admin.");
+    }
+  };
+
+  const handleRejectAdmin = async (adminId) => {
+    try {
+      await deleteDoc(doc(db, "user", adminId));
+      setPendingAdmins((prev) => prev.filter((item) => item.id !== adminId));
+    } catch (error) {
+      console.error("REJECT ADMIN ERROR:", error?.code, error?.message);
+      setPendingAdminsError("Failed to reject admin.");
+    }
   };
 
   const getLatestAppointment = (appointments = []) => {
@@ -929,6 +1259,9 @@ const WellnessForm = () => {
     setActiveTab(tab);
     if (tab === "clients") {
       loadClients();
+    }
+    if (tab === "adminManagement") {
+      loadPendingAdmins();
     }
   };
 
@@ -1001,6 +1334,10 @@ const WellnessForm = () => {
   };
 
   const deleteClient = async (client) => {
+    if (currentRole !== "admin" && client.assignedCoachId !== currentCoachId) {
+      showSaveNotice("Action not allowed.");
+      return;
+    }
     const deletedAtMs = Date.now();
     const updateLocal = () => {
       setClients((prev) =>
@@ -1064,6 +1401,7 @@ const WellnessForm = () => {
       appointments,
       evaluation
     };
+    const assignedCoachId = currentCoachId || CURRENT_COACH_ID;
 
     if (!skipDuplicateCheck && !state.present.clientId) {
       const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
@@ -1122,7 +1460,7 @@ const WellnessForm = () => {
         action: state.present.clientId ? "update" : "create",
         data: state.present.clientId
           ? payload
-          : { ...payload, assignedCoachId: CURRENT_COACH_ID },
+          : { ...payload, assignedCoachId },
         timestamp: Date.now(),
         syncStatus: "pending"
       };
@@ -1150,7 +1488,7 @@ const WellnessForm = () => {
 
     const docRef = await addDoc(collection(db, "clients"), {
       ...payload,
-      assignedCoachId: CURRENT_COACH_ID,
+      assignedCoachId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -1160,6 +1498,431 @@ const WellnessForm = () => {
     });
     showSaveNotice("Client saved successfully");
   };
+
+  const handleAdminLogin = async () => {
+    const emailValue = adminEmail.trim();
+    const passwordValue = adminPassword;
+    if (!emailValue || !passwordValue) {
+      setAuthError("Enter email and password.");
+      return;
+    }
+    setAuthError("");
+    try {
+      const result = await signInWithEmailAndPassword(auth, emailValue, passwordValue);
+      const profileSnap = await getDoc(doc(db, "user", result.user.uid));
+      const profile = profileSnap.exists() ? profileSnap.data() : null;
+      if (!profile || profile.role !== "admin") {
+        setAuthError("Access denied.");
+        return;
+      }
+      if (profile.status && profile.status !== "approved" && !profile.isCoreAdmin) {
+        setAuthError("Awaiting admin approval");
+        await signOut(auth);
+        return;
+      }
+      localStorage.setItem(ADMIN_SESSION_KEY, result.user.uid);
+      setSession({
+        role: "admin",
+        adminUid: result.user.uid,
+        coachId: "",
+        coachName: "",
+        isCoreAdmin: Boolean(profile.isCoreAdmin),
+        adminStatus: profile.status || ""
+      });
+      handleTabChange("clients");
+    } catch (error) {
+      setAuthError("Login failed.");
+    }
+  };
+
+  const handleAdminRegister = async () => {
+    const nameValue = adminRegisterName.trim();
+    const emailValue = adminRegisterEmail.trim();
+    const passwordValue = adminRegisterPassword;
+    if (!nameValue || !emailValue || !passwordValue) {
+      setAuthError("Enter name, email, and password.");
+      return;
+    }
+    setAuthError("");
+    try {
+      const created = await createUserWithEmailAndPassword(auth, emailValue, passwordValue);
+      await setDoc(doc(db, "user", created.user.uid), {
+        name: nameValue,
+        email: emailValue,
+        role: "admin",
+        status: "pending",
+        isCoreAdmin: false,
+        createdAt: serverTimestamp()
+      });
+      await signOut(auth);
+      setAdminRegisterName("");
+      setAdminRegisterEmail("");
+      setAdminRegisterPassword("");
+      setAuthView("admin");
+      setAuthError("Awaiting admin approval");
+    } catch (error) {
+      const messageByCode = {
+        "auth/email-already-in-use": "Email already in use.",
+        "auth/invalid-email": "Enter a valid email.",
+        "auth/weak-password": "Password should be at least 6 characters.",
+        "auth/operation-not-allowed": "Email/password sign-up is disabled."
+      };
+      setAuthError(messageByCode[error.code] || "Registration failed.");
+    }
+  };
+
+  const handleCoachRegister = async () => {
+    const nameValue = coachName.trim();
+    const phoneValue = coachPhone.trim();
+    if (!nameValue || !phoneValue) {
+      setAuthError("Enter name and phone.");
+      return;
+    }
+    setAuthError("");
+    let createdUser = null;
+    try {
+      const tempEmail = `${phoneValue}@coach.local`;
+      const tempPassword = "coach1234";
+      const created = await createUserWithEmailAndPassword(auth, tempEmail, tempPassword);
+      createdUser = created.user;
+      await createdUser.getIdToken(true);
+      await setDoc(doc(db, "user", createdUser.uid), {
+        name: nameValue,
+        phone: phoneValue,
+        role: "coach",
+        createdAt: serverTimestamp()
+      });
+      localStorage.setItem(COACH_SESSION_KEY, createdUser.uid);
+      localStorage.setItem(COACH_NAME_KEY, nameValue);
+      setSession({
+        role: "coach",
+        coachId: createdUser.uid,
+        adminUid: "",
+        coachName: nameValue,
+        isCoreAdmin: false,
+        adminStatus: ""
+      });
+      handleTabChange("clients");
+    } catch (error) {
+      console.error("COACH REG ERROR:", error.code, error.message);
+      if (createdUser) {
+        try {
+          await deleteUser(createdUser);
+        } catch (cleanupError) {
+          // ignore cleanup errors
+        }
+      }
+      setAuthError("Registration failed.");
+    }
+  };
+
+  const handleCoachLogin = async () => {
+    const nameValue = coachLoginName.trim();
+    const phoneValue = coachLoginPhone.trim();
+    if (!nameValue || !phoneValue) {
+      setAuthError("Enter name and phone.");
+      return;
+    }
+    setAuthError("");
+    try {
+      const tempEmail = `${phoneValue}@coach.local`;
+      const tempPassword = "coach1234";
+      const result = await signInWithEmailAndPassword(auth, tempEmail, tempPassword);
+      const coachSnap = await getDoc(doc(db, "user", result.user.uid));
+      if (!coachSnap.exists()) {
+        setAuthError("Coach not found.");
+        await signOut(auth);
+        return;
+      }
+      const coachData = coachSnap.data() || {};
+      if (coachData.role !== "coach" || coachData.phone !== phoneValue) {
+        setAuthError("Coach not found.");
+        await signOut(auth);
+        return;
+      }
+      localStorage.setItem(COACH_SESSION_KEY, result.user.uid);
+      localStorage.setItem(COACH_NAME_KEY, coachData.name || nameValue);
+    } catch (error) {
+      console.error("COACH LOGIN ERROR:", error.code, error.message);
+      setAuthError("Login failed.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (session.role === "admin" || session.role === "coach") {
+        await signOut(auth);
+      }
+    } catch (error) {
+      // ignore logout errors
+    }
+    localStorage.removeItem(ADMIN_SESSION_KEY);
+    localStorage.removeItem(COACH_SESSION_KEY);
+    localStorage.removeItem(COACH_NAME_KEY);
+    setSession({
+      role: null,
+      coachId: "",
+      adminUid: "",
+      coachName: "",
+      isCoreAdmin: false,
+      adminStatus: ""
+    });
+    setAuthView("initial");
+    setAuthError("");
+    setAdminEmail("");
+    setAdminPassword("");
+    setAdminRegisterName("");
+    setAdminRegisterEmail("");
+    setAdminRegisterPassword("");
+    setCoachName("");
+    setCoachPhone("");
+    setCoachLoginName("");
+    setCoachLoginPhone("");
+    setActiveTab("form");
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center text-sm text-gray-600">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!session.role) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
+        <div className="w-full max-w-sm rounded border bg-white p-6 shadow-sm">
+          <div className="mb-4 flex flex-col items-center text-center">
+            <img
+              src={wellnessLogo}
+              alt="Herbalife"
+              className="h-16 w-auto object-contain"
+            />
+            <div className="mt-3 text-lg font-bold text-[#2f4f1f]">PERSONAL</div>
+            <div className="text-2xl font-bold text-[#2f4f1f]">WELLNESS PASS</div>
+          </div>
+          {authView === "initial" ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("admin");
+                }}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Login as Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("adminRegister");
+                }}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Register as Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("coachLogin");
+                }}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Login as Coach
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("coach");
+                }}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Register as Coach
+              </button>
+            </div>
+          ) : null}
+          {authView === "admin" ? (
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-gray-800">Admin Login</div>
+              <input
+                type="email"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+              />
+              <div className="relative">
+                <input
+                  type={showAdminPassword ? "text" : "password"}
+                  className="w-full rounded border px-3 py-2 text-sm pr-10"
+                  placeholder="Password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPassword((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-500"
+                >
+                  {showAdminPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              {authError ? <div className="text-sm text-red-600">{authError}</div> : null}
+              <button
+                type="button"
+                onClick={handleAdminLogin}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("initial");
+                }}
+                className="w-full text-xs text-gray-500 hover:underline"
+              >
+                Back
+              </button>
+            </div>
+          ) : null}
+          {authView === "adminRegister" ? (
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-gray-800">Admin Registration</div>
+              <input
+                type="text"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Name"
+                value={adminRegisterName}
+                onChange={(e) => setAdminRegisterName(e.target.value)}
+              />
+              <input
+                type="email"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Email"
+                value={adminRegisterEmail}
+                onChange={(e) => setAdminRegisterEmail(e.target.value)}
+              />
+              <div className="relative">
+                <input
+                  type={showAdminRegisterPassword ? "text" : "password"}
+                  className="w-full rounded border px-3 py-2 text-sm pr-10"
+                  placeholder="Password"
+                  value={adminRegisterPassword}
+                  onChange={(e) => setAdminRegisterPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminRegisterPassword((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-gray-500"
+                >
+                  {showAdminRegisterPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              {authError ? <div className="text-sm text-red-600">{authError}</div> : null}
+              <button
+                type="button"
+                onClick={handleAdminRegister}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Register
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("initial");
+                }}
+                className="w-full text-xs text-gray-500 hover:underline"
+              >
+                Back
+              </button>
+            </div>
+          ) : null}
+          {authView === "coachLogin" ? (
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-gray-800">Coach Login</div>
+              <input
+                type="text"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Name"
+                value={coachLoginName}
+                onChange={(e) => setCoachLoginName(e.target.value)}
+              />
+              <input
+                type="tel"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Phone"
+                value={coachLoginPhone}
+                onChange={(e) => setCoachLoginPhone(e.target.value)}
+              />
+              {authError ? <div className="text-sm text-red-600">{authError}</div> : null}
+              <button
+                type="button"
+                onClick={handleCoachLogin}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("initial");
+                }}
+                className="w-full text-xs text-gray-500 hover:underline"
+              >
+                Back
+              </button>
+            </div>
+          ) : null}
+          {authView === "coach" ? (
+            <div className="space-y-3">
+              <div className="text-lg font-semibold text-gray-800">Coach Registration</div>
+              <input
+                type="text"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Name"
+                value={coachName}
+                onChange={(e) => setCoachName(e.target.value)}
+              />
+              <input
+                type="tel"
+                className="w-full rounded border px-3 py-2 text-sm"
+                placeholder="Phone"
+                value={coachPhone}
+                onChange={(e) => setCoachPhone(e.target.value)}
+              />
+              {authError ? <div className="text-sm text-red-600">{authError}</div> : null}
+              <button
+                type="button"
+                onClick={handleCoachRegister}
+                className="w-full rounded border px-4 py-2 text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Register
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthError("");
+                  setAuthView("initial");
+                }}
+                className="w-full text-xs text-gray-500 hover:underline"
+              >
+                Back
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-gray-100 min-h-screen">
@@ -1184,6 +1947,32 @@ const WellnessForm = () => {
           }`}
         >
           Clients
+        </button>
+        {currentRole === "admin" ? (
+          <button
+            onClick={() => setActiveTab("reports")}
+            className={`px-4 py-2 rounded border text-sm font-semibold ${
+              activeTab === "reports" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+            }`}
+          >
+            Reports
+          </button>
+        ) : null}
+        {currentRole === "admin" && session.isCoreAdmin ? (
+          <button
+            onClick={() => handleTabChange("adminManagement")}
+            className={`px-4 py-2 rounded border text-sm font-semibold ${
+              activeTab === "adminManagement" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+            }`}
+          >
+            Admin Management
+          </button>
+        ) : null}
+        <button
+          onClick={handleLogout}
+          className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+        >
+          Logout
         </button>
       </div>
       {activeTab === "form" ? (
@@ -1220,6 +2009,12 @@ const WellnessForm = () => {
             Export as PDF
           </button>
           <button
+            onClick={handleSharePdf}
+            className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
+          >
+            Share PDF
+          </button>
+          <button
             onClick={handleSave}
             className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
           >
@@ -1228,18 +2023,6 @@ const WellnessForm = () => {
         </div>
       ) : null}
 
-      <div className="fixed top-4 left-4 z-40 flex items-center gap-2 rounded border bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow print:hidden">
-        <label htmlFor="role-switch">Role</label>
-        <select
-          id="role-switch"
-          className="border rounded px-2 py-1 text-xs bg-white"
-          value={currentRole}
-          onChange={(e) => setCurrentRole(e.target.value)}
-        >
-          <option value="coach">Coach</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
       {activeTab === "clients" ? (
         <div className="max-w-5xl mx-auto bg-white shadow-lg p-6 print:hidden">
           <div className="flex items-center justify-between mb-4">
@@ -1263,7 +2046,10 @@ const WellnessForm = () => {
               </select>
               <button
                 type="button"
-                onClick={() => setClientsView("all")}
+                onClick={() => {
+                  setClientsView("all");
+                  loadClients();
+                }}
                 className={`px-4 py-2 rounded border text-sm font-semibold ${
                   clientsView === "all" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
                 }`}
@@ -1271,17 +2057,17 @@ const WellnessForm = () => {
                 All Clients
               </button>
               <button
+                onClick={loadClients}
+                className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
+              >
+                Refresh Clients
+              </button>
+              <button
                 type="button"
                 onClick={downloadClientsPdf}
                 className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
               >
                 Download PDF
-              </button>
-              <button
-                onClick={loadClients}
-                className="px-4 py-2 rounded border text-sm font-semibold bg-white hover:bg-gray-100"
-              >
-                Sync from Cloud
               </button>
               <button
                 type="button"
@@ -1297,23 +2083,71 @@ const WellnessForm = () => {
             </div>
           </div>
           {clientsView !== "recycleBin" ? (
-            <div className="mb-4 flex flex-wrap gap-2">
-              {[
-                { value: "thisWeek", label: "This Week" },
-                { value: "thisMonth", label: "This Month" },
-                { value: "byCoach", label: "By Coach" }
-              ].map((view) => (
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  key={view.value}
                   type="button"
-                  onClick={() => setClientsView(view.value)}
+                  onClick={() => setClientsView("today")}
                   className={`px-3 py-1 rounded border text-xs font-semibold ${
-                    clientsView === view.value ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                    clientsView === "today" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
                   }`}
                 >
-                  {view.label}
+                  Today
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setClientsView("thisWeek")}
+                  className={`px-3 py-1 rounded border text-xs font-semibold ${
+                    clientsView === "thisWeek" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                  }`}
+                >
+                  This Week
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClientsView("thisMonth")}
+                  className={`px-3 py-1 rounded border text-xs font-semibold ${
+                    clientsView === "thisMonth" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClientsView("byDate")}
+                  className={`px-3 py-1 rounded border text-xs font-semibold ${
+                    clientsView === "byDate" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                  }`}
+                >
+                  By Date
+                </button>
+                {clientsView === "byDate" ? (
+                  <input
+                    type="date"
+                    className="border rounded px-2 py-1 text-xs bg-white"
+                    value={clientsByDate}
+                    onChange={(e) => {
+                      setClientsByDate(e.target.value);
+                      setClientsView("byDate");
+                    }}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setClientsView("byCoach")}
+                  className={`px-3 py-1 rounded border text-xs font-semibold ${
+                    clientsView === "byCoach" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                  }`}
+                >
+                  By Coach
+                </button>
+              </div>
+              <div className="flex items-center gap-2 rounded border bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm">
+                <span>Total Clients</span>
+                <span className="text-sm font-bold text-[#2f4f1f]">
+                  {getVisibleClientsForReports().length}
+                </span>
+              </div>
             </div>
           ) : null}
           {clientsView === "recycleBin" ? (
@@ -1384,13 +2218,15 @@ const WellnessForm = () => {
                         {coachName}
                       </div>
                       <div className="space-y-3">
-                        {coachClients.map((client) => (
+                        {coachClients.map((client, index) => (
                           <div
                             key={client.id}
                             className="border rounded p-3 cursor-pointer hover:bg-gray-50"
                             onClick={() => toggleClient(client.id)}
                           >
-                            <div className="font-semibold text-[#2f4f1f]">{client.clientName || "Unnamed client"}</div>
+                            <div className="font-semibold text-[#2f4f1f]">
+                              {index + 1}. {client.clientName || "Unnamed client"}
+                            </div>
                             <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
                                 <span>Age: {client.age || client.page2Data?.age || "-"}</span>
@@ -1550,6 +2386,16 @@ const WellnessForm = () => {
                                           <div><span className="font-semibold">Visceral Fat:</span> {latestAppointment.visceral || "-"}</div>
                                         </div>
                                       </div>
+                                      <div className="mt-3">
+                                        <div className="font-semibold text-gray-700">Evaluation</div>
+                                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                          <div><span className="font-semibold">Body Fat:</span> {formatEvaluationValue(client.evaluation?.bodyFat)}</div>
+                                          <div><span className="font-semibold">Muscle Mass:</span> {formatEvaluationValue(client.evaluation?.muscleMass)}</div>
+                                          <div><span className="font-semibold">Questionnaire:</span> {formatEvaluationValue(client.evaluation?.questionnaire)}</div>
+                                          <div><span className="font-semibold">Body Water:</span> {formatEvaluationValue(client.evaluation?.bodyWater)}</div>
+                                          <div><span className="font-semibold">Visceral Fat:</span> {formatEvaluationValue(client.evaluation?.visceralFat)}</div>
+                                        </div>
+                                      </div>
                                     </div>
                                   );
                                 })()}
@@ -1561,13 +2407,15 @@ const WellnessForm = () => {
                     </div>
                   ))
               ) : (
-                sortedClients.map((client) => (
+                sortedClients.map((client, index) => (
                   <div
                     key={client.id}
                     className="border rounded p-3 cursor-pointer hover:bg-gray-50"
                     onClick={() => toggleClient(client.id)}
                   >
-                    <div className="font-semibold text-[#2f4f1f]">{client.clientName || "Unnamed client"}</div>
+                    <div className="font-semibold text-[#2f4f1f]">
+                      {index + 1}. {client.clientName || "Unnamed client"}
+                    </div>
                     <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
                         <span>Age: {client.age || client.page2Data?.age || "-"}</span>
@@ -1721,6 +2569,16 @@ const WellnessForm = () => {
                                   <div><span className="font-semibold">Visceral Fat:</span> {latestAppointment.visceral || "-"}</div>
                                 </div>
                               </div>
+                              <div className="mt-3">
+                                <div className="font-semibold text-gray-700">Evaluation</div>
+                                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                  <div><span className="font-semibold">Body Fat:</span> {formatEvaluationValue(client.evaluation?.bodyFat)}</div>
+                                  <div><span className="font-semibold">Muscle Mass:</span> {formatEvaluationValue(client.evaluation?.muscleMass)}</div>
+                                  <div><span className="font-semibold">Questionnaire:</span> {formatEvaluationValue(client.evaluation?.questionnaire)}</div>
+                                  <div><span className="font-semibold">Body Water:</span> {formatEvaluationValue(client.evaluation?.bodyWater)}</div>
+                                  <div><span className="font-semibold">Visceral Fat:</span> {formatEvaluationValue(client.evaluation?.visceralFat)}</div>
+                                </div>
+                              </div>
                             </div>
                           );
                         })()}
@@ -1731,6 +2589,110 @@ const WellnessForm = () => {
               )}
             </div>
           )}
+        </div>
+      ) : null}
+
+      {activeTab === "adminManagement" && currentRole === "admin" && session.isCoreAdmin ? (
+        <div className="max-w-5xl mx-auto bg-white shadow-lg p-6 print:hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-[#2f4f1f]">Admin Management</h2>
+            <button
+              type="button"
+              onClick={loadPendingAdmins}
+              className="rounded border px-3 py-1 text-sm font-semibold bg-white hover:bg-gray-100"
+            >
+              Refresh
+            </button>
+          </div>
+          {pendingAdminsLoading ? (
+            <div className="text-sm text-gray-600">Loading pending admins...</div>
+          ) : null}
+          {pendingAdminsError ? (
+            <div className="text-sm text-red-600">{pendingAdminsError}</div>
+          ) : null}
+          {!pendingAdminsLoading && !pendingAdminsError && !pendingAdmins.length ? (
+            <div className="text-sm text-gray-600">No pending admins.</div>
+          ) : null}
+          {!pendingAdminsLoading && !pendingAdminsError && pendingAdmins.length ? (
+            <div className="space-y-3">
+              {pendingAdmins.map((admin) => (
+                <div
+                  key={admin.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded border p-3"
+                >
+                  <div>
+                    <div className="font-semibold text-gray-800">{admin.name || "Unnamed"}</div>
+                    <div className="text-sm text-gray-600">{admin.email || "-"}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleApproveAdmin(admin.id)}
+                      className="rounded border px-3 py-1 text-sm font-semibold bg-white hover:bg-gray-100"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectAdmin(admin.id)}
+                      className="rounded border px-3 py-1 text-sm font-semibold bg-white hover:bg-gray-100"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {activeTab === "reports" ? (
+        <div className="max-w-5xl mx-auto bg-white shadow-lg p-6 print:hidden">
+          {(() => {
+            const visibleClients = getVisibleClientsForReports();
+            const coachMap = new Map();
+            visibleClients.forEach((client) => {
+              const coachName = client.coach || "Unassigned";
+              coachMap.set(coachName, (coachMap.get(coachName) || 0) + 1);
+            });
+            const coachEntries = Array.from(coachMap.entries()).sort(([a], [b]) =>
+              a.localeCompare(b)
+            );
+            return (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded border bg-white p-4 shadow-sm">
+                    <div className="text-sm font-semibold text-gray-600">Total Clients</div>
+                    <div className="mt-2 text-2xl font-bold text-[#2f4f1f]">
+                      {visibleClients.length}
+                    </div>
+                  </div>
+                  <div className="rounded border bg-white p-4 shadow-sm">
+                    <div className="text-sm font-semibold text-gray-600">Active Coaches</div>
+                    <div className="mt-2 text-2xl font-bold text-[#2f4f1f]">
+                      {coachEntries.length}
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded border bg-white p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-gray-600">Clients per Coach</div>
+                  {coachEntries.length ? (
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {coachEntries.map(([coachName, count]) => (
+                        <div key={coachName} className="flex items-center justify-between rounded border px-3 py-2">
+                          <span className="font-semibold text-gray-700">{coachName}</span>
+                          <span className="font-semibold text-[#2f4f1f]">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-gray-600">No clients found.</div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -2592,6 +3554,12 @@ const WellnessForm = () => {
         >
           <Download size={20} />
           Export as PDF
+        </button>
+        <button
+          onClick={handleSharePdf}
+          className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
+        >
+          Share PDF
         </button>
         <button
           onClick={handleSave}
