@@ -1,0 +1,209 @@
+Here’s the full context and the exact logic that got you the “perfect” result (one PDF, correct layout, correct name) so you can reuse it in future apps.
+
+✅ The Core Lesson
+Mobile browsers are inconsistent with PDF filenames, but printing is the only path that preserves layout perfectly.
+
+So the winning approach is:
+
+Use print (window.print()) on all devices
+Set document.title right before print to control the filename
+Do not run html2pdf in the background (it creates extra files and layout differences)
+This is what made your final result:
+✅ perfect layout
+✅ correct filename
+✅ only one PDF output
+
+✅ The Exact Logic We Used
+1) Build the filename from live form values
+
+
+const buildPdfTitle = () => {
+  const name = page2Data.name.trim();
+  const coachValue = page2Data.coach.trim();
+  const coach = coachValue.startsWith("Coach ") ? coachValue : coachValue ? `Coach ${coachValue}` : "";
+  const date = formatDateForFilename(page2Data.date);
+
+  const parts = [];
+  if (name) parts.push(name);
+  if (date) parts.push(date);
+  if (coach) parts.push(coach);
+
+  const title = parts.length ? parts.join(" ") : "Personal Wellness Pass";
+  return title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+};
+
+
+
+2) Apply the filename as document.title right before print
+
+const applyPrintTitle = () => {
+  const nextTitle = buildPdfTitle() || "Personal Wellness Pass";
+  document.title = nextTitle;
+  const titleEl = document.querySelector("title");
+  if (titleEl) titleEl.textContent = nextTitle;
+};
+
+
+
+3) Print with a small delay so the title actually sticks
+
+const exportViaPrint = () => {
+  const originalTitle = document.title;
+  applyPrintTitle();
+
+  const handleAfterPrint = () => {
+    document.title = originalTitle;
+    const titleEl = document.querySelector("title");
+    if (titleEl) titleEl.textContent = originalTitle;
+    window.removeEventListener("afterprint", handleAfterPrint);
+  };
+
+  window.addEventListener("afterprint", handleAfterPrint);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.print();
+      setTimeout(handleAfterPrint, 2000);
+    });
+  });
+};
+
+
+Why the double requestAnimationFrame?
+It ensures the browser has enough time to update the <title> before the print dialog captures the filename.
+
+
+
+
+4) Trigger print from your Download button
+
+
+const exportToPDF = () => {
+  exportViaPrint();
+};
+
+
+
+✅ Why It Works (Key Insight)
+Print layout is identical across devices
+document.title is still the best available filename hint
+Extra background downloads = inconsistent layout and duplicate files
+So: single print flow = single perfect PDF
+✅ How to Reuse in Future Apps
+Just repeat this pattern:
+
+Build filename from form data
+Sanitize it
+Set document.title right before print
+Wait a tick
+Call window.print()
+Restore the old title
+
+
+
+
+
+
+
+
+
+
+Here’s a reusable print‑utils.js module you can drop into any future app. It contains everything you need for consistent filename + print behavior.
+
+
+// print-utils.js
+// Reusable print + filename helpers
+
+export const sanitizeFilename = (value) => {
+  return String(value || "")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+export const formatDateForFilename = (value) => {
+  if (!value) return "";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+
+  const dashMatch = trimmed.match(/^(\d{2})-([A-Za-z]+)-(\d{4})$/);
+  if (dashMatch) {
+    const [, day, month, year] = dashMatch;
+    return `${day} ${month} ${year}`;
+  }
+
+  const slashMatch = trimmed.match(/^(\d{2})[\/.-](\d{2})[\/.-](\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    const monthName = new Date(Number(year), Number(month) - 1, 1).toLocaleString("en-US", {
+      month: "long"
+    });
+    return `${day} ${monthName} ${year}`;
+  }
+
+  return trimmed.replace(/\s+/g, " ");
+};
+
+export const buildPrintTitle = ({ name, date, coach }, fallback = "Document") => {
+  const parts = [];
+  if (name) parts.push(name.trim());
+  if (date) parts.push(formatDateForFilename(date));
+  if (coach) parts.push(coach.trim());
+  const title = parts.length ? parts.join(" ") : fallback;
+  return sanitizeFilename(title);
+};
+
+export const applyPrintTitle = (title) => {
+  if (!title) return;
+  document.title = title;
+  const titleEl = document.querySelector("title");
+  if (titleEl) titleEl.textContent = title;
+};
+
+export const printWithTitle = (title, { restoreDelay = 2000 } = {}) => {
+  const originalTitle = document.title;
+  applyPrintTitle(title);
+
+  const handleAfterPrint = () => {
+    document.title = originalTitle;
+    const titleEl = document.querySelector("title");
+    if (titleEl) titleEl.textContent = originalTitle;
+    window.removeEventListener("afterprint", handleAfterPrint);
+  };
+
+  window.addEventListener("afterprint", handleAfterPrint);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.print();
+      setTimeout(handleAfterPrint, restoreDelay);
+    });
+  });
+};
+
+
+
+
+
+
+
+Example usage in any component
+
+
+import { buildPrintTitle, printWithTitle } from "./print-utils";
+
+const handleDownload = () => {
+  const title = buildPrintTitle({
+    name: page2Data.name,
+    date: page2Data.date,
+    coach: page2Data.coach
+  }, "Personal Wellness Pass");
+
+  printWithTitle(title);
+};
+
+
+
+
+
+

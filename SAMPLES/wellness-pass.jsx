@@ -73,14 +73,7 @@ const defaultPage2Data = {
   date: "",
   name: "",
   coach: "",
-  age: "",
-  addressLocation: "",
-  eventAttended: "",
-  race: "",
-  raceOther: "",
-  gender: "",
-  genderOther: "",
-  status: ""
+  age: ""
 };
 
 const defaultFormState = {
@@ -169,7 +162,6 @@ const reducer = (state, action) => {
 };
 
 const WellnessForm = () => {
-  const STATUS_OPTIONS = ["Prospect", "Active Client", "Reffered Client"];
   const [state, dispatch] = useReducer(
     reducer,
     undefined,
@@ -231,12 +223,6 @@ const WellnessForm = () => {
   useEffect(() => {
 // registerSW({ immediate: true });
   }, []);
-
-  useEffect(() => {
-    if (currentRole !== "admin" && clientsView === "byCoach") {
-      setClientsView("all");
-    }
-  }, [currentRole, clientsView]);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -499,20 +485,6 @@ const WellnessForm = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.present));
   }, [state.present]);
 
-  useEffect(() => {
-    if (!state.present.clientId) return;
-    setClients((prev) =>
-      prev.map((client) =>
-        client.id === state.present.clientId
-          ? {
-              ...client,
-              page2Data: { ...(client.page2Data || {}), status: page2Data.status }
-            }
-          : client
-      )
-    );
-  }, [state.present.clientId, page2Data.status]);
-
   // Debounced autosave triggered by user edits only.
   useEffect(() => {
     if (activeTab !== "clients") return;
@@ -624,47 +596,6 @@ const WellnessForm = () => {
     }
     return String(value);
   };
-  const formatSelectWithOther = (value, otherValue) => {
-    const base = String(value ?? "").trim();
-    if (!base) return "";
-    if (base !== "Other") return base;
-    const other = String(otherValue ?? "").trim();
-    return other ? `Other (${other})` : "Other";
-  };
-  const getStatusClasses = (statusValue) => {
-    switch (statusValue) {
-      case "Prospect":
-        return "border-amber-200 bg-amber-50 text-amber-800";
-      case "Active Client":
-        return "border-emerald-200 bg-emerald-50 text-emerald-800";
-      case "Reffered Client":
-        return "border-sky-200 bg-sky-50 text-sky-800";
-      default:
-        return "border-gray-200 bg-gray-50 text-gray-600";
-    }
-  };
-  const getGenderDisplay = (client) =>
-    formatSelectWithOther(client.page2Data?.gender, client.page2Data?.genderOther);
-  const getRaceDisplay = (client) =>
-    formatSelectWithOther(client.page2Data?.race, client.page2Data?.raceOther);
-  const getAddressDisplay = (client) => String(client.page2Data?.addressLocation ?? "").trim();
-  const getGenderListDisplay = (client) => {
-    const base = String(client.page2Data?.gender ?? "").trim();
-    if (!base) return "";
-    return base === "Other" ? "Other" : base;
-  };
-  const getClientGroupLabel = (client) => {
-    switch (clientsView) {
-      case "byCoach":
-        return client.coach || "Unassigned";
-      case "byGender":
-        return getGenderListDisplay(client) || "Unspecified";
-      case "byRace":
-        return getRaceDisplay(client) || "Unspecified";
-      default:
-        return "";
-    }
-  };
 
   const formatDateForFilename = (value) => {
     if (!value) return "";
@@ -709,99 +640,26 @@ const WellnessForm = () => {
     if (titleEl) titleEl.textContent = nextTitle;
   };
 
-  const buildPdfHtmlSnapshot = () => {
-    const source = document.getElementById("wellness-pdf-source");
-    if (!source) return "";
-
-    const clone = source.cloneNode(true);
-    const fields = clone.querySelectorAll("input, textarea, select");
-    fields.forEach((field) => {
-      const tag = field.tagName.toLowerCase();
-      if (tag === "textarea") {
-        field.textContent = field.value || "";
-        return;
-      }
-      if (tag === "select") {
-        Array.from(field.options).forEach((option) => {
-          option.selected = option.value === field.value;
-        });
-        return;
-      }
-      if (field.type === "checkbox" || field.type === "radio") {
-        if (field.checked) {
-          field.setAttribute("checked", "checked");
-        } else {
-          field.removeAttribute("checked");
-        }
-        return;
-      }
-      field.setAttribute("value", field.value ?? "");
-    });
-
-    const styleTags = Array.from(document.querySelectorAll("style"))
-      .map((style) => style.textContent || "")
-      .join("\n");
-    const linkTags = Array.from(document.querySelectorAll("link[rel='stylesheet']"))
-      .map((link) => {
-        const href = link.href ? new URL(link.href, window.location.href).toString() : "";
-        return href ? `<link rel="stylesheet" href="${href}">` : "";
-      })
-      .join("\n");
-
-    const baseHref = new URL("/", window.location.href).toString();
-    return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base href="${baseHref}">
-    ${linkTags}
-    <style>${styleTags}</style>
-  </head>
-  <body>
-    ${clone.outerHTML}
-  </body>
-</html>`;
-  };
-
-  const getPdfServerEndpoint = () => {
-    if (typeof window === "undefined") return "/render-pdf";
-    const isLocal =
-      window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1";
-    return isLocal ? "http://localhost:8787/render-pdf" : "/.netlify/functions/render-pdf";
-  };
-
-  const getPdfServerHealthEndpoint = () => {
-    if (typeof window === "undefined") return "/render-pdf";
-    const isLocal =
-      window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1";
-    return isLocal ? "http://localhost:8787/render-pdf/health" : "/.netlify/functions/render-pdf";
-  };
-
   const isMobileDevice = () => {
+    // Check for mobile user agents
     const mobileRegex = /iPhone|iPad|iPod|Android|webOS|BlackBerry|Windows Phone/i;
     const isMobileUA = mobileRegex.test(navigator.userAgent);
+    
+    // Check for iPad Pro (reports as desktop but is touch device)
     const isIPadPro = navigator.maxTouchPoints > 1 && /MacIntel/.test(navigator.platform);
+    
     return isMobileUA || isIPadPro;
   };
 
-  const exportViaPrint = ({ afterPrint } = {}) => {
+  const exportViaPrint = () => {
     const originalTitle = document.title;
     applyPrintTitle();
-    let fired = false;
 
     const handleAfterPrint = () => {
-      if (fired) return;
-      fired = true;
       document.title = originalTitle;
       const titleEl = document.querySelector("title");
       if (titleEl) titleEl.textContent = originalTitle;
       window.removeEventListener("afterprint", handleAfterPrint);
-      if (typeof afterPrint === "function") {
-        afterPrint();
-      }
     };
 
     window.addEventListener("afterprint", handleAfterPrint);
@@ -814,43 +672,18 @@ const WellnessForm = () => {
     });
   };
 
-  const exportViaDownload = async ({ silent = false } = {}) => {
+  const exportViaDownload = async () => {
     const el = document.getElementById("wellness-pdf-source");
     if (!el) {
-      if (!silent) {
-        showSaveNotice("Unable to generate PDF. Please try again.");
-      }
+      showSaveNotice("Unable to generate PDF. Please try again.");
       return;
     }
 
     document.body.classList.add("pdf-mode");
-    const tempContainer = document.createElement("div");
-    tempContainer.style.position = "fixed";
-    tempContainer.style.top = "0";
-    tempContainer.style.left = "0";
-    tempContainer.style.width = "210mm";
-    tempContainer.style.margin = "0";
-    tempContainer.style.padding = "0";
-    tempContainer.style.background = "#ffffff";
-    tempContainer.style.zIndex = "9999";
-    tempContainer.style.pointerEvents = "none";
-    tempContainer.style.overflow = "visible";
-    document.body.appendChild(tempContainer);
-
-    const clone = el.cloneNode(true);
-    clone.style.margin = "0";
-    clone.style.padding = "0";
-    clone.style.width = "210mm";
-    clone.style.maxWidth = "210mm";
-    clone.style.boxShadow = "none";
-    clone.style.transform = "none";
-    const cloneChildren = clone.querySelectorAll("*");
-    cloneChildren.forEach((node) => {
-      node.style.boxShadow = "none";
-    });
-    tempContainer.appendChild(clone);
+    
     try {
-      const imgs = clone.querySelectorAll("img");
+      // Wait for images to load
+      const imgs = el.querySelectorAll("img");
       await Promise.all(
         Array.from(imgs).map((img) => (img.decode ? img.decode() : Promise.resolve()))
       );
@@ -860,15 +693,14 @@ const WellnessForm = () => {
     }
 
     try {
-      if (!silent) {
-        showSaveNotice("Generating PDF...");
-      }
+      showSaveNotice("Generating PDF...");
+      
       const title = buildPdfTitle();
       const filename = `${title || "Personal Wellness Pass"}.pdf`.replace(/[\\/:*?"<>|]+/g, " ");
-      const rect = clone.getBoundingClientRect();
+
       const opts = {
-        margin: [0, 0, 0, 0],
-        filename,
+        margin: [10, 8, 8, 8],
+        filename: filename,
         image: { type: "jpeg", quality: 0.95 },
         html2canvas: {
           scale: 2,
@@ -877,39 +709,33 @@ const WellnessForm = () => {
           logging: false,
           backgroundColor: "#ffffff",
           scrollX: 0,
-          scrollY: 0,
-          windowWidth: clone.scrollWidth || rect.width,
-          windowHeight: clone.scrollHeight || rect.height
+          scrollY: -window.scrollY,
+          windowWidth: document.documentElement.offsetWidth,
+          windowHeight: document.documentElement.offsetHeight
         },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
         pagebreak: { mode: ["css", "legacy"], after: ".print-break" }
       };
-      await html2pdf().set(opts).from(clone).save();
-      if (!silent) {
-        showSaveNotice("PDF downloaded successfully!");
-      }
+
+      await html2pdf().set(opts).from(el).save();
+      
+      showSaveNotice("PDF downloaded successfully!");
     } catch (error) {
       console.error("PDF generation error:", error);
-      if (!silent) {
-        showSaveNotice("PDF generation failed. Please try again.");
-      }
+      showSaveNotice("PDF generation failed. Please try again.");
     } finally {
-      if (document.body.contains(tempContainer)) {
-        document.body.removeChild(tempContainer);
-      }
       document.body.classList.remove("pdf-mode");
     }
   };
 
   const exportToPDF = () => {
     void autosaveNow("export");
+    
     if (isMobileDevice()) {
-      exportViaPrint({
-        afterPrint: () => {
-          exportViaDownload({ silent: true });
-        }
-      });
+      // Mobile: Use html2pdf for direct download with correct filename
+      exportViaDownload();
     } else {
+      // Desktop: Use native print dialog (respects document.title)
       exportViaPrint();
     }
   };
@@ -920,32 +746,53 @@ const WellnessForm = () => {
 
     const fallback = () => {
       setSharePdfLoading(false);
-      showSaveNotice("Unable to generate shareable PDF. Try again.");
+      exportToPDF();
+      showSaveNotice("PDF exported. Save it, then share from your device (e.g. WhatsApp, Email).");
     };
 
     if (!navigator.share) {
-      showSaveNotice("Sharing is not supported on this device.");
+      fallback();
       return;
     }
 
-    const html = buildPdfHtmlSnapshot();
-    if (!html) {
+    const el = document.getElementById("wellness-pdf-source");
+    if (!el) {
       fallback();
       return;
     }
 
     setSharePdfLoading(true);
+    document.body.classList.add("pdf-mode");
     try {
-      const response = await fetch(getPdfServerEndpoint(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html })
-      });
-      if (!response.ok) {
-        fallback();
-        return;
-      }
-      const blob = await response.blob();
+      const imgs = el.querySelectorAll("img");
+      await Promise.all(
+        Array.from(imgs).map((img) => (img.decode ? img.decode() : Promise.resolve()))
+      );
+      await new Promise((r) => setTimeout(r, 200));
+    } catch {
+      /* ignore decode errors */
+    }
+
+    try {
+      const opts = {
+        margin: [0, 8, 8, 8],
+        filename: "",
+        image: { type: "jpeg", quality: 0.95 },
+        html2canvas: {
+          scale: 1.5,
+          useCORS: true,
+          allowTaint: false,
+          logging: false,
+          backgroundColor: "#ffffff",
+          scrollX: 0,
+          scrollY: -window.scrollY,
+          windowWidth: document.documentElement.offsetWidth,
+          windowHeight: document.documentElement.offsetHeight
+        },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        pagebreak: { mode: ["css", "legacy"], after: ".print-break" }
+      };
+      const blob = await html2pdf().set(opts).from(el).outputPdf("blob");
       if (!blob || blob.size < 500) {
         fallback();
         return;
@@ -967,6 +814,8 @@ const WellnessForm = () => {
         return;
       }
       fallback();
+    } finally {
+      document.body.classList.remove("pdf-mode");
     }
   };
 
@@ -1027,10 +876,6 @@ const WellnessForm = () => {
         return "Clients This Month";
       case "byCoach":
         return "Clients By Coach";
-      case "byGender":
-        return "Clients By Gender";
-      case "byRace":
-        return "Clients By Race";
       case "all":
       default:
         return "All Clients";
@@ -1066,11 +911,11 @@ const WellnessForm = () => {
     `;
 
     let bodyHtml = "";
-    if (["byCoach", "byGender", "byRace"].includes(clientsView)) {
+    if (clientsView === "byCoach") {
       const grouped = sortedClients.reduce((acc, client) => {
-        const groupLabel = getClientGroupLabel(client);
-        if (!acc[groupLabel]) acc[groupLabel] = [];
-        acc[groupLabel].push(client);
+        const coachName = client.coach || "Unassigned";
+        if (!acc[coachName]) acc[coachName] = [];
+        acc[coachName].push(client);
         return acc;
       }, {});
       bodyHtml = Object.entries(grouped)
@@ -1469,7 +1314,7 @@ const WellnessForm = () => {
     const { start, end } = getWeekRange(now);
     const viewFiltered = visibleClients.filter((client) => {
       if (clientsView === "recycleBin") return true;
-      if (clientsView === "all" || clientsView === "byCoach" || clientsView === "byGender" || clientsView === "byRace") return true;
+      if (clientsView === "all" || clientsView === "byCoach") return true;
       const parsed = parseClientDate(client.date);
       if (!parsed) return false;
       if (clientsView === "today") {
@@ -1574,14 +1419,7 @@ const WellnessForm = () => {
       payload.email,
       payload.coach,
       payload.date,
-      payload.age,
-      payload.page2Data?.addressLocation,
-      payload.page2Data?.eventAttended,
-      payload.page2Data?.race,
-      payload.page2Data?.raceOther,
-      payload.page2Data?.gender,
-      payload.page2Data?.genderOther,
-      payload.page2Data?.status
+      payload.age
     ];
     if (fields.some((value) => String(value ?? "").trim() !== "")) return true;
     const hasAppointment = Array.isArray(payload.appointments) && payload.appointments.some(
@@ -2073,60 +1911,6 @@ const WellnessForm = () => {
     });
     if (!silent) {
       showSaveNotice("Client saved successfully");
-    }
-  };
-
-  const updateClientStatus = async (client, nextStatus) => {
-    const updatedPage2Data = { ...(client.page2Data || {}), status: nextStatus };
-    setClients((prev) =>
-      prev.map((item) =>
-        item.id === client.id ? { ...item, page2Data: updatedPage2Data } : item
-      )
-    );
-    if (state.present.clientId && client.id === state.present.clientId) {
-      dispatch({
-        type: "UPDATE",
-        updater: (prev) => ({
-          ...prev,
-          page2Data: { ...prev.page2Data, status: nextStatus }
-        })
-      });
-    }
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
-      const queueItem = {
-        clientId: client.id,
-        action: "update",
-        data: { page2Data: updatedPage2Data },
-        timestamp: Date.now(),
-        syncStatus: "pending"
-      };
-      try {
-        const rawQueue = localStorage.getItem(OFFLINE_QUEUE_KEY);
-        const queue = rawQueue ? JSON.parse(rawQueue) : [];
-        queue.push(queueItem);
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-      } catch (error) {
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify([queueItem]));
-      }
-      showSaveNotice("Status updated (offline).");
-      return;
-    }
-    try {
-      await updateDoc(doc(db, "clients", client.id), {
-        page2Data: updatedPage2Data,
-        syncStatus: "synced",
-        updatedAt: serverTimestamp()
-      });
-      setClients((prev) =>
-        prev.map((item) =>
-          item.id === client.id
-            ? { ...item, syncStatus: "synced", updatedAt: { toMillis: () => Date.now() } }
-            : item
-        )
-      );
-    } catch (error) {
-      console.error("UPDATE STATUS ERROR:", error?.code, error?.message);
-      showSaveNotice("Failed to update status.");
     }
   };
 
@@ -2653,14 +2437,6 @@ const WellnessForm = () => {
             <Download size={20} />
             Download PDF
           </button>
-          <button
-            type="button"
-            onClick={handleSharePdf}
-            disabled={sharePdfLoading}
-            className={`bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18] ${sharePdfLoading ? "opacity-70 cursor-not-allowed" : ""}`}
-          >
-            Share PDF
-          </button>
         <button
           onClick={handleSave}
           className="bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18]"
@@ -2779,38 +2555,15 @@ const WellnessForm = () => {
                     }}
                   />
                 ) : null}
-                {currentRole === "admin" ? (
-                  null
-                ) : null}
                 <button
                   type="button"
-                  onClick={() => setClientsView("byGender")}
+                  onClick={() => setClientsView("byCoach")}
                   className={`px-3 py-1 rounded border text-xs font-semibold ${
-                    clientsView === "byGender" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
+                    clientsView === "byCoach" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
                   }`}
                 >
-                  By Gender
+                  By Coach
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setClientsView("byRace")}
-                  className={`px-3 py-1 rounded border text-xs font-semibold ${
-                    clientsView === "byRace" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
-                  }`}
-                >
-                  By Race
-                </button>
-                {currentRole === "admin" ? (
-                  <button
-                    type="button"
-                    onClick={() => setClientsView("byCoach")}
-                    className={`px-3 py-1 rounded border text-xs font-semibold ${
-                      clientsView === "byCoach" ? "bg-white" : "bg-gray-100 hover:bg-gray-200"
-                    }`}
-                  >
-                    By Coach
-                  </button>
-                ) : null}
               </div>
               <div className="flex items-center gap-2 rounded border bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm">
                 <span>Total Clients</span>
@@ -2872,20 +2625,20 @@ const WellnessForm = () => {
             <div className="text-sm text-gray-600">No clients found.</div>
           ) : (
             <div className="space-y-3">
-              {["byCoach", "byGender", "byRace"].includes(clientsView) ? (
+              {clientsView === "byCoach" ? (
                 Object.entries(
                   sortedClients.reduce((acc, client) => {
-                    const groupLabel = getClientGroupLabel(client);
-                    if (!acc[groupLabel]) acc[groupLabel] = [];
-                    acc[groupLabel].push(client);
+                    const coachName = client.coach || "Unassigned";
+                    if (!acc[coachName]) acc[coachName] = [];
+                    acc[coachName].push(client);
                     return acc;
                   }, {})
                 )
                   .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([groupLabel, coachClients]) => (
-                    <div key={groupLabel}>
+                  .map(([coachName, coachClients]) => (
+                    <div key={coachName}>
                       <div className="text-sm font-semibold text-gray-700 mb-2">
-                        {groupLabel}
+                        {coachName}
                       </div>
                       <div className="space-y-3">
                         {coachClients.map((client, index) => (
@@ -2894,26 +2647,11 @@ const WellnessForm = () => {
                             className="border rounded p-3 cursor-pointer hover:bg-gray-50"
                             onClick={() => toggleClient(client.id)}
                           >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-semibold text-[#2f4f1f]">
-                                {index + 1}. {client.clientName || "Unnamed client"}
-                              </div>
-                              <select
-                                className={`rounded border px-2 py-1 text-[11px] font-semibold ${getStatusClasses(client.page2Data?.status)}`}
-                                value={client.page2Data?.status || ""}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => updateClientStatus(client, e.target.value)}
-                              >
-                                <option value="">Status</option>
-                                {STATUS_OPTIONS.map((option) => (
-                                  <option key={option} value={option}>{option}</option>
-                                ))}
-                              </select>
+                            <div className="font-semibold text-[#2f4f1f]">
+                              {index + 1}. {client.clientName || "Unnamed client"}
                             </div>
                             <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
-                                <span>Gender: {getGenderDisplay(client) || "-"}</span>
-                                <span>|</span>
                                 <span>Age: {client.age || client.page2Data?.age || "-"}</span>
                                 <span>|</span>
                                 <span>Coach: {client.coach || "-"}</span>
@@ -2928,18 +2666,6 @@ const WellnessForm = () => {
                                     >
                                       Phone: {client.phone}
                                     </a>
-                                  </>
-                                ) : null}
-                                {getAddressDisplay(client) ? (
-                                  <>
-                                    <span>|</span>
-                                    <span>Address/Location: {getAddressDisplay(client)}</span>
-                                  </>
-                                ) : null}
-                                {getRaceDisplay(client) ? (
-                                  <>
-                                    <span>|</span>
-                                    <span>Race: {getRaceDisplay(client)}</span>
                                   </>
                                 ) : null}
                                 {client.email ? (
@@ -3050,6 +2776,9 @@ const WellnessForm = () => {
                             </div>
                             {expandedClientId === client.id ? (
                               <div className="mt-3 text-sm text-gray-800 border-t pt-3">
+                                {client.phone ? (
+                                  <div><span className="font-semibold">Phone:</span> {client.phone}</div>
+                                ) : null}
                                 {client.email ? (
                                   <div><span className="font-semibold">Email:</span> {client.email}</div>
                                 ) : null}
@@ -3060,10 +2789,10 @@ const WellnessForm = () => {
                                   }
                                   return (
                                     <div className="pt-2">
-                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                          <div className="space-y-1">
-                                            <div><span className="font-semibold">Age:</span> {client.age || client.page2Data?.age || "-"}</div>
-                                          <div><span className="font-semibold">Next appointment:</span> {formatClientDate(latestAppointment.age) || "-"}</div>
+                                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                        <div className="space-y-1">
+                                          <div><span className="font-semibold">Age:</span> {client.age || client.page2Data?.age || "-"}</div>
+                                          <div><span className="font-semibold">Next appointment:</span> {formatClientDate(client.date) || "-"}</div>
                                           <div><span className="font-semibold">Height (Cm):</span> {latestAppointment.height || "-"}</div>
                                           <div><span className="font-semibold">Weight (Kg):</span> {latestAppointment.weight || "-"}</div>
                                         </div>
@@ -3107,26 +2836,11 @@ const WellnessForm = () => {
                     className="border rounded p-3 cursor-pointer hover:bg-gray-50"
                     onClick={() => toggleClient(client.id)}
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-semibold text-[#2f4f1f]">
-                        {index + 1}. {client.clientName || "Unnamed client"}
-                      </div>
-                      <select
-                        className={`rounded border px-2 py-1 text-[11px] font-semibold ${getStatusClasses(client.page2Data?.status)}`}
-                        value={client.page2Data?.status || ""}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => updateClientStatus(client, e.target.value)}
-                      >
-                        <option value="">Status</option>
-                        {STATUS_OPTIONS.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </select>
+                    <div className="font-semibold text-[#2f4f1f]">
+                      {index + 1}. {client.clientName || "Unnamed client"}
                     </div>
                     <div className="flex flex-col gap-2 text-xs text-gray-700 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 break-all">
-                        <span>Gender: {getGenderDisplay(client) || "-"}</span>
-                        <span>|</span>
                         <span>Age: {client.age || client.page2Data?.age || "-"}</span>
                         <span>|</span>
                         <span>Coach: {client.coach || "-"}</span>
@@ -3141,18 +2855,6 @@ const WellnessForm = () => {
                             >
                               Phone: {client.phone}
                             </a>
-                          </>
-                        ) : null}
-                        {getAddressDisplay(client) ? (
-                          <>
-                            <span>|</span>
-                            <span>Address/Location: {getAddressDisplay(client)}</span>
-                          </>
-                        ) : null}
-                        {getRaceDisplay(client) ? (
-                          <>
-                            <span>|</span>
-                            <span>Race: {getRaceDisplay(client)}</span>
                           </>
                         ) : null}
                         {client.email ? (
@@ -3263,9 +2965,6 @@ const WellnessForm = () => {
                     </div>
                     {expandedClientId === client.id ? (
                       <div className="mt-3 text-sm text-gray-800 border-t pt-3">
-                        {client.email ? (
-                          <div><span className="font-semibold">Email:</span> {client.email}</div>
-                        ) : null}
                         {(() => {
                           const latestAppointment = getLatestAppointment(client.appointments);
                           if (!latestAppointment) {
@@ -3276,7 +2975,7 @@ const WellnessForm = () => {
                               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                                 <div className="space-y-1">
                                   <div><span className="font-semibold">Age:</span> {client.age || client.page2Data?.age || "-"}</div>
-                                  <div><span className="font-semibold">Next appointment:</span> {formatClientDate(latestAppointment.age) || "-"}</div>
+                                  <div><span className="font-semibold">Next appointment:</span> {formatClientDate(client.date) || "-"}</div>
                                   <div><span className="font-semibold">Height (Cm):</span> {latestAppointment.height || "-"}</div>
                                   <div><span className="font-semibold">Weight (Kg):</span> {latestAppointment.weight || "-"}</div>
                                 </div>
@@ -3493,156 +3192,59 @@ const WellnessForm = () => {
                 </div>
 
                 <div className="bg-white/95 p-6 m-4 sm:m-8">
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Date</label>
-                    <input
-                      type="text"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
-                      value={page2Data.date}
-                      onChange={(e) => updatePage2Data("date", e.target.value)}
-                      placeholder="DD-MONTH-YYYY"
-                    />
-                    <button
-                      type="button"
-                      onClick={setTodayDate}
-                      className="border-2 border-[#2f4f1f] text-[#2f4f1f] px-3 py-2 text-xs font-bold uppercase tracking-wide hover:bg-[#e7edd5] print:hidden"
-                    >
-                      Today
-                    </button>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Date:</label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <input
+                        type="text"
+                        className="flex-1 border-b-2 border-[#2f4f1f] p-2"
+                        value={page2Data.date}
+                        onChange={(e) => updatePage2Data("date", e.target.value)}
+                        placeholder="DD-MONTH-YYYY"
+                      />
+                      <button
+                        type="button"
+                        onClick={setTodayDate}
+                        className="border-2 border-[#2f4f1f] text-[#2f4f1f] px-3 py-2 text-xs font-bold uppercase tracking-wide hover:bg-[#e7edd5] print:hidden"
+                      >
+                        Today
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Name</label>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Name</label>
                     <input
                       type="text"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
+                      className="w-full border-b-2 border-[#2f4f1f] p-2"
                       value={page2Data.name}
                       onChange={(e) => updatePage2Data("name", e.target.value)}
                     />
                   </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Gender</label>
-                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                      <select
-                        className="flex-1 min-w-[180px] border-b-2 border-[#2f4f1f] p-2 text-sm bg-white"
-                        value={page2Data.gender}
-                        onChange={(e) => {
-                          const nextValue = e.target.value;
-                          updatePage2Data("gender", nextValue);
-                          if (nextValue !== "Other") {
-                            updatePage2Data("genderOther", "");
-                          }
-                        }}
-                      >
-                        <option value="">Select</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                      </select>
-                      {page2Data.gender === "Other" ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm font-semibold text-gray-600">Other (</span>
-                          <input
-                            type="text"
-                            className="min-w-[140px] flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
-                            placeholder="Specify"
-                            value={page2Data.genderOther}
-                            onChange={(e) => updatePage2Data("genderOther", e.target.value)}
-                          />
-                          <span className="text-sm font-semibold text-gray-600">)</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Race</label>
-                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                      <select
-                        className="flex-1 min-w-[180px] border-b-2 border-[#2f4f1f] p-2 text-sm bg-white"
-                        value={page2Data.race}
-                        onChange={(e) => {
-                          const nextValue = e.target.value;
-                          updatePage2Data("race", nextValue);
-                          if (nextValue !== "Other") {
-                            updatePage2Data("raceOther", "");
-                          }
-                        }}
-                      >
-                        <option value="">Select</option>
-                        <option value="Black">Black</option>
-                        <option value="White">White</option>
-                        <option value="Indian/Asian">Indian/Asian</option>
-                        <option value="Other">Other</option>
-                      </select>
-                      {page2Data.race === "Other" ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-sm font-semibold text-gray-600">Other (</span>
-                          <input
-                            type="text"
-                            className="min-w-[140px] flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
-                            placeholder="Specify"
-                            value={page2Data.raceOther}
-                            onChange={(e) => updatePage2Data("raceOther", e.target.value)}
-                          />
-                          <span className="text-sm font-semibold text-gray-600">)</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Phone Number</label>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Phone Number</label>
                     <input
                       type="tel"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
+                      className="w-full border-b-2 border-[#2f4f1f] p-2"
                       value={phone}
                       onChange={(e) => updateTopLevel("phone", e.target.value)}
                     />
                   </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Email</label>
+                  <div className="mb-6">
+                    <label className="block font-bold mb-2">Email</label>
                     <input
                       type="email"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
+                      className="w-full border-b-2 border-[#2f4f1f] p-2"
                       value={email}
                       onChange={(e) => updateTopLevel("email", e.target.value)}
                     />
                   </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Address/Location</label>
+
+                  <div className="border-2 border-[#2f4f1f] p-4 text-center">
+                    <label className="block font-bold mb-2">Your Personal Wellness Coach</label>
                     <input
                       type="text"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
-                      value={page2Data.addressLocation}
-                      onChange={(e) => updatePage2Data("addressLocation", e.target.value)}
-                    />
-                  </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Event Attended</label>
-                    <input
-                      type="text"
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm"
-                      value={page2Data.eventAttended}
-                      onChange={(e) => updatePage2Data("eventAttended", e.target.value)}
-                    />
-                  </div>
-                  <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <label className="w-36 text-sm font-bold">Status</label>
-                    <select
-                      className="flex-1 border-b-2 border-[#2f4f1f] p-2 text-sm bg-white"
-                      value={page2Data.status}
-                      onChange={(e) => updatePage2Data("status", e.target.value)}
-                    >
-                      <option value="">Select</option>
-                      {STATUS_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="border-2 border-[#2f4f1f] p-4 text-center coach-box">
-                    <label className="block text-sm font-bold mb-2">Your Personal Wellness Coach</label>
-                    <input
-                      type="text"
-                      className="w-full text-center p-2 text-sm"
+                      className="w-full text-center p-2"
                       value={page2Data.coach}
                       onChange={(e) => updatePage2Data("coach", e.target.value)}
                     />
@@ -4227,17 +3829,6 @@ const WellnessForm = () => {
         .bg-gray-100 {
           overflow: visible;
         }
-        @media screen {
-          .cover-shell {
-            height: auto;
-          }
-          .cover-layer {
-            position: static;
-          }
-          .coach-box {
-            margin-bottom: 12px;
-          }
-        }
         @media print {
           @page {
             size: portrait;
@@ -4261,15 +3852,6 @@ const WellnessForm = () => {
           body {
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
-          }
-          select {
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            background-image: none;
-          }
-          select::-ms-expand {
-            display: none;
           }
           .print-fit-table {
             overflow: visible !important;
@@ -4303,15 +3885,6 @@ const WellnessForm = () => {
         body.pdf-mode .print-min-w-0 {
           min-width: 0 !important;
         }
-        body.pdf-mode select {
-          -webkit-appearance: none;
-          -moz-appearance: none;
-          appearance: none;
-          background-image: none;
-        }
-        body.pdf-mode select::-ms-expand {
-          display: none;
-        }
         body.pdf-mode .cover-layer {
           position: static !important;
         }
@@ -4320,13 +3893,6 @@ const WellnessForm = () => {
         }
         body.pdf-mode .shadow-lg {
           box-shadow: none !important;
-        }
-        body.pdf-mode #wellness-pdf-source,
-        body.pdf-mode .max-w-7xl {
-          width: 210mm !important;
-          max-width: 210mm !important;
-          margin-left: auto !important;
-          margin-right: auto !important;
         }
         @media print and (orientation: landscape) {
           @page {
@@ -4446,14 +4012,6 @@ const WellnessForm = () => {
         >
           <Download size={20} />
           Download PDF
-        </button>
-        <button
-          type="button"
-          onClick={handleSharePdf}
-          disabled={sharePdfLoading}
-          className={`bg-[#2f4f1f] text-white px-4 py-2 rounded hover:bg-[#243c18] ${sharePdfLoading ? "opacity-70 cursor-not-allowed" : ""}`}
-        >
-          Share PDF
         </button>
         <button
           onClick={handleSave}

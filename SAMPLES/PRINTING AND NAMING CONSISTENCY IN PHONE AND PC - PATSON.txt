@@ -1,0 +1,596 @@
+Below is the exact approach and structure I used so the PDF layout stays consistent across PC/laptop/tablet/phone and the filename stays consistent. Use this as a repeatable pattern for future apps.
+
+1) Document Structure (Layout Consistency)
+Goal: Make the layout deterministic by using fixed‑size containers, then scale for smaller screens.
+
+Core pattern
+Single root container for each template/form:
+Example: #form-container and #invoice-container
+Give each a fixed width (e.g., 800px or 850px) and consistent padding.
+Use absolute positioning only for overlays (like stickers) so they don’t push other content.
+Why it works:
+A fixed layout eliminates browser reflow differences. Scaling then makes the same layout fit any screen.
+
+2) Responsive Strategy (Mobile/Tablet)
+Goal: Show the same layout on small screens without reflow.
+
+Pattern used:
+Keep layout fixed size.
+Scale down the container for smaller viewports:
+@media (max-width: 900px) {
+  #form-container, #invoice-container {
+    transform: translateX(-50%) scale(clamp(0.35, (100vw - 24px)/var(--form-width), 0.9));
+    transform-origin: top left;
+    left: 50%;
+  }
+}
+
+
+
+This preserves layout proportions.
+Why it works:
+Scaling avoids text wrapping/reflow; the layout is identical to desktop.
+
+3) PDF/Print Layout (Consistency in Export)
+Goal: Print/PDF looks identical to on‑screen layout, without cropping.
+
+Key rules in @media print
+Fix page size: @page { size: A4; margin: 0; }
+Force container width: width: 210mm;
+Avoid reflow in print: don’t use media‑only rearrangements.
+Print both templates with page breaks:
+
+#form-container { page-break-after: always; }
+#invoice-container { page-break-before: always; }
+
+
+Keep print identical:
+Hide UI controls only:
+
+.controls, .sticker-controls, .today-button, .signature-controls { display: none; }
+
+
+
+Do NOT override layout sizes/positions unless needed.
+Why it works:
+Print CSS gives the browser explicit page dimensions so it doesn’t scale unpredictably.
+
+4) Sticker/Image Handling (Size without shifting layout)
+Goal: Make stickers bigger without moving other elements.
+
+Pattern used
+Sticker container has fixed size so it doesn’t push layout:
+
+.sticker-box { position: absolute; width: 400px; height: 310px; }
+.sticker-frame { width: 400px; height: 250px; }
+
+
+Crop output matches the frame size:
+
+const targetWidth = 400;
+const targetHeight = 250;
+
+Why it works:
+Absolute positioning keeps layout stable. Matching crop size avoids stretching.
+
+5) Filename Consistency (NAME DATE ID)
+Goal: Always save PDF as NAME DATE ID on all devices.
+
+Strategy
+Create a single function to build the filename:
+
+const buildFilename = (element) => {
+  const name = ...;
+  const date = ...;
+  const id = ...;
+  return `${name} ${date} ${id}`;
+};
+
+
+Sanitize the filename so it’s valid on all OSes:
+
+const sanitizeFilename = (value) =>
+  value.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+
+Set document.title before printing:
+
+document.title = sanitizeFilename(buildFilename(...));
+
+Trigger beforeprint update:
+
+window.addEventListener('beforeprint', applyPrintTitle);
+
+Why it works:
+Most browsers use document.title for the print PDF filename.
+
+6) Dual Template Printing (Page 1 + Page 2)
+Goal: Print both templates in one go, but still selectable.
+
+Pattern
+Both templates are always in DOM
+Hide inactive one visually (screen only):
+
+.template-hidden { display: none; }
+@media print { .template-hidden { display: block !important; } }
+
+
+Add page breaks between them (print only).
+Why it works:
+Screen stays clean, print shows both pages.
+
+7) Minimal UI in Print (Professional output)
+Hide buttons, upload controls, and any UI overlays:
+
+.sticker-controls, .signature-controls, .today-button, .controls { display: none !important; }
+
+
+8) Debug Checklist (when print/PDF mismatch happens)
+Is the container fixed width?
+If not, layout will shift.
+Are you overriding layout inside @media print?
+Avoid unless absolutely necessary.
+Are templates always present in DOM?
+Print can only show elements that exist.
+Are page breaks defined?
+Use page-break-before/after.
+Is filename set right before print?
+Use beforeprint + document.title.
+9) Summary Blueprint (Use this for new apps)
+Fixed layout container (one per template).
+Scale for mobile instead of reflow.
+Print CSS = A4, no margins, page break.
+Hide UI only in print.
+Filename from form values → sanitize → set title.
+Print both templates using hidden DOM + print overrides.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HERE IS THE README FILE
+
+
+What’s included
+
+Fixed‑width layout + mobile scaling
+Two‑page print (referral + invoice)
+Filename generation (NAME DATE ID) with sanitization
+beforeprint/focus/visibilitychange hooks to force title updates
+
+
+
+
+
+
+
+
+
+
+
+
+# PDF-Consistent Template Blueprint
+
+This is a reusable blueprint for building forms that export/print consistently across desktop, tablet, and mobile, with consistent filenames.
+
+## Key Rules
+1) Fixed layout container for each template (e.g., 800px wide)
+2) Scale container on mobile instead of reflowing layout
+3) Print CSS uses A4 sizing and page breaks
+4) Hide UI controls in print only
+5) Filename built from form values -> sanitized -> set as document.title before print
+
+## Folder Layout
+- react/Template.jsx
+- react/print.css (optional if you want to keep print styles separate)
+- react/print-utils.js
+- plain-html/index.html (single-file version)
+
+---
+
+## React Usage
+1) Copy `react/Template.jsx` into your app
+2) Import and render it
+3) Use `print-utils.js` helpers for consistent filename
+4) Ensure your form inputs include `name` attributes used in `getFilenameFromForm`
+
+---
+
+## Plain HTML Usage
+1) Open `plain-html/index.html`
+2) Replace the form fields with your layout
+3) Use the built-in print filename logic
+
+---
+
+## Filename Format
+The filename is built as:
+
+NAME DATE ID
+
+Example:
+ALI ABDUL 11 JAN 2026 09876
+
+---
+
+If you want this turned into a full Vite starter, tell me and I will scaffold it.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HERE IS A TEMPLATE.JSX FILE:
+
+
+import { useCallback, useEffect, useMemo } from 'react';
+import {
+  applyPrintTitle,
+  preparePrintTitle
+} from './print-utils';
+
+const Template = () => {
+  const referralFields = useMemo(() => ({
+    dateName: 'referralDate',
+    nameName: 'patientName',
+    idName: 'idNumber'
+  }), []);
+
+  const invoiceFields = useMemo(() => ({
+    dateName: 'invoiceDate',
+    nameName: 'invoicePatientName',
+    idName: 'invoiceAccountNumber'
+  }), []);
+
+  const setTitleForPrint = useCallback(() => {
+    const referralRoot = document.getElementById('form-container');
+    const invoiceRoot = document.getElementById('invoice-container');
+    const title = preparePrintTitle({
+      referralRoot,
+      invoiceRoot,
+      referralFields,
+      invoiceFields
+    });
+    applyPrintTitle(title);
+  }, [referralFields, invoiceFields]);
+
+  const handlePrint = useCallback(async () => {
+    setTitleForPrint();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    window.print();
+  }, [setTitleForPrint]);
+
+  useEffect(() => {
+    window.addEventListener('beforeprint', setTitleForPrint);
+    window.addEventListener('focus', setTitleForPrint);
+    document.addEventListener('visibilitychange', setTitleForPrint);
+    return () => {
+      window.removeEventListener('beforeprint', setTitleForPrint);
+      window.removeEventListener('focus', setTitleForPrint);
+      document.removeEventListener('visibilitychange', setTitleForPrint);
+    };
+  }, [setTitleForPrint]);
+
+  return (
+    <>
+      <style>
+        {`
+          :root { --form-width: 800px; }
+          body { margin: 0; padding: 20px; background: #f0f0f0; }
+          #form-container, #invoice-container {
+            width: var(--form-width);
+            padding: 40px;
+            background: #fff;
+            position: relative;
+            box-sizing: border-box;
+          }
+          .template-hidden { display: none; }
+
+          @media (max-width: 900px) {
+            #form-container, #invoice-container {
+              transform: translateX(-50%) scale(clamp(0.35, (100vw - 24px) / var(--form-width), 0.9));
+              transform-origin: top left;
+              left: 50%;
+            }
+          }
+
+          @media print {
+            @page { size: A4 portrait; margin: 0; }
+            #form-container, #invoice-container {
+              width: 210mm; height: 297mm; padding: 8mm; margin: 0; box-shadow: none;
+            }
+            .controls { display: none !important; }
+            .template-hidden { display: block !important; }
+            #form-container { page-break-after: always; }
+            #invoice-container { page-break-before: always; }
+          }
+        `}
+      </style>
+
+      <div className="controls">
+        <button type="button" onClick={handlePrint}>Print</button>
+      </div>
+
+      <div id="form-container">
+        {/* Referral template content here */}
+      </div>
+
+      <div id="invoice-container" className="template-hidden">
+        {/* Invoice template content here */}
+      </div>
+    </>
+  );
+};
+
+export default Template;
+
+
+
+
+
+
+
+
+
+
+HERE IS THE PRINT-UTILS.JS FILE:
+
+export const sanitizeFilename = (value) => {
+  if (!value) return '';
+  return value
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+export const formatDateShort = (date) => {
+  const months = [
+    'JAN','FEB','MAR','APR','MAY','JUN',
+    'JUL','AUG','SEP','OCT','NOV','DEC'
+  ];
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+export const formatDateForFilename = (value) => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d{2})\s*-\s*(\d{2})\s*-\s*(\d{4})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    const months = [
+      'JAN','FEB','MAR','APR','MAY','JUN',
+      'JUL','AUG','SEP','OCT','NOV','DEC'
+    ];
+    const monthName = months[parseInt(month, 10) - 1] || month;
+    return `${day} ${monthName} ${year}`;
+  }
+  return trimmed;
+};
+
+export const getFilenameFromForm = ({
+  root,
+  dateName,
+  nameName,
+  idName
+}) => {
+  if (!root) return 'PATIENT';
+  const dateInput = root.querySelector(`input[name="${dateName}"]`);
+  const nameInput = root.querySelector(`input[name="${nameName}"]`);
+  const idInput = root.querySelector(`input[name="${idName}"]`);
+
+  const today = new Date();
+  const fileDate = dateInput && dateInput.value
+    ? formatDateForFilename(dateInput.value)
+    : formatDateShort(today);
+  const nameValue = nameInput && nameInput.value ? nameInput.value.trim() : 'PATIENT';
+  const idValue = idInput && idInput.value ? idInput.value.trim() : 'ID';
+
+  return sanitizeFilename(`${nameValue} ${fileDate} ${idValue}`) || 'PATIENT';
+};
+
+export const applyPrintTitle = (title) => {
+  if (!title) return;
+  document.title = title;
+  const titleEl = document.querySelector('title');
+  if (titleEl) titleEl.textContent = title;
+};
+
+export const preparePrintTitle = ({
+  referralRoot,
+  invoiceRoot,
+  referralFields,
+  invoiceFields
+}) => {
+  if (referralRoot) {
+    return getFilenameFromForm({
+      root: referralRoot,
+      ...referralFields
+    });
+  }
+  if (invoiceRoot) {
+    return getFilenameFromForm({
+      root: invoiceRoot,
+      ...invoiceFields
+    });
+  }
+  return 'PATIENT';
+};
+
+
+
+
+
+
+
+
+
+
+
+
+HERE IS THE INDEX.HTML FILE:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PATIENT</title>
+  <style>
+    :root { --form-width: 800px; }
+    body {
+      margin: 0; padding: 20px; background: #f0f0f0; font-family: Arial, sans-serif;
+    }
+    #form-container, #invoice-container {
+      width: var(--form-width); padding: 40px; background: #fff; position: relative; box-sizing: border-box;
+    }
+    .template-hidden { display: none; }
+
+    @media (max-width: 900px) {
+      #form-container, #invoice-container {
+        transform: translateX(-50%) scale(clamp(0.35, (100vw - 24px) / var(--form-width), 0.9));
+        transform-origin: top left;
+        left: 50%;
+      }
+    }
+
+    @media print {
+      @page { size: A4 portrait; margin: 0; }
+      #form-container, #invoice-container {
+        width: 210mm; height: 297mm; padding: 8mm; margin: 0; box-shadow: none;
+      }
+      .controls { display: none !important; }
+      .template-hidden { display: block !important; }
+      #form-container { page-break-after: always; }
+      #invoice-container { page-break-before: always; }
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button type="button" onclick="handlePrint()">Print</button>
+  </div>
+
+  <div id="form-container">
+    <!-- Referral template content here -->
+    <input name="referralDate" placeholder="Date" />
+    <input name="patientName" placeholder="Name" />
+    <input name="idNumber" placeholder="ID" />
+  </div>
+
+  <div id="invoice-container" class="template-hidden">
+    <!-- Invoice template content here -->
+    <input name="invoiceDate" placeholder="Date" />
+    <input name="invoicePatientName" placeholder="Name" />
+    <input name="invoiceAccountNumber" placeholder="ID" />
+  </div>
+
+  <script>
+    const sanitizeFilename = (value) => {
+      if (!value) return '';
+      return value.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
+    const formatDateShort = (date) => {
+      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = months[date.getMonth()];
+      const year = date.getFullYear();
+      return `${day} ${month} ${year}`;
+    };
+
+    const formatDateForFilename = (value) => {
+      if (!value) return '';
+      const trimmed = value.trim();
+      const match = trimmed.match(/^(\d{2})\s*-\s*(\d{2})\s*-\s*(\d{4})$/);
+      if (match) {
+        const [, day, month, year] = match;
+        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        const monthName = months[parseInt(month, 10) - 1] || month;
+        return `${day} ${monthName} ${year}`;
+      }
+      return trimmed;
+    };
+
+    const getFilenameFromForm = ({ root, dateName, nameName, idName }) => {
+      if (!root) return 'PATIENT';
+      const dateInput = root.querySelector(`input[name="${dateName}"]`);
+      const nameInput = root.querySelector(`input[name="${nameName}"]`);
+      const idInput = root.querySelector(`input[name="${idName}"]`);
+      const today = new Date();
+      const fileDate = dateInput && dateInput.value ? formatDateForFilename(dateInput.value) : formatDateShort(today);
+      const nameValue = nameInput && nameInput.value ? nameInput.value.trim() : 'PATIENT';
+      const idValue = idInput && idInput.value ? idInput.value.trim() : 'ID';
+      return sanitizeFilename(`${nameValue} ${fileDate} ${idValue}`) || 'PATIENT';
+    };
+
+    const applyPrintTitle = () => {
+      const referralRoot = document.getElementById('form-container');
+      const invoiceRoot = document.getElementById('invoice-container');
+      const title = referralRoot
+        ? getFilenameFromForm({ root: referralRoot, dateName: 'referralDate', nameName: 'patientName', idName: 'idNumber' })
+        : getFilenameFromForm({ root: invoiceRoot, dateName: 'invoiceDate', nameName: 'invoicePatientName', idName: 'invoiceAccountNumber' });
+      document.title = title;
+      const titleEl = document.querySelector('title');
+      if (titleEl) titleEl.textContent = title;
+    };
+
+    const handlePrint = async () => {
+      applyPrintTitle();
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      window.print();
+    };
+
+    window.addEventListener('beforeprint', applyPrintTitle);
+    window.addEventListener('focus', applyPrintTitle);
+    document.addEventListener('visibilitychange', applyPrintTitle);
+  </script>
+</body>
+</html>
+
